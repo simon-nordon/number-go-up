@@ -7,7 +7,8 @@ const files = [
   "water-plants",
   "merchant",
   "boy",
-  ...Array.from({ length: 10 }, (_, i) => `fish-${i + 1}`),
+  ...[31, 34, 35, 45].map((id) => `pond-fish-${id}`),
+  ...Array.from({ length: 10 }, (_, i) => `rod-${i + 1}`),
   ...["idle", "walk"].flatMap((state) =>
     ["head", "body"].map((part) => `player-${state}-${part}`),
   ),

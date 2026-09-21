@@ -3,16 +3,31 @@ import assert from "node:assert/strict";
 import {
   atFishingSpot,
   BUILDING_PLOTS,
+  canvasYCorrection,
   cameraYFor,
   CAMP_CAMERA_Y,
   CAMP_START,
   isWalkable,
   LAKE_START,
+  screenToViewPoint,
   STATIONS,
+  TOUCH_AIM_OFFSET,
   VIEW_H,
   walkingRoute,
   type Point,
 } from "../src/layout.ts";
+
+test("portrait overlays stay proportional and touch aiming is lifted in screen space", () => {
+  assert.equal(canvasYCorrection(1280, 720), 1);
+  assert.equal(canvasYCorrection(360, 720), 0.28125);
+
+  const bounds = { left: 10, top: 20, width: 360, height: 720 };
+  const direct = screenToViewPoint(190, 380, bounds);
+  const lifted = screenToViewPoint(190, 380, bounds, TOUCH_AIM_OFFSET);
+  assert.deepEqual(direct, { x: 640, y: 360 });
+  assert.equal(lifted.x, direct.x);
+  assert.equal(direct.y - lifted.y, TOUCH_AIM_OFFSET);
+});
 
 test("camera framing keeps saved positions visible throughout the north-south journey", () => {
   assert.equal(cameraYFor(LAKE_START), 0);

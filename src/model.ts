@@ -21,7 +21,7 @@ export interface Fish {
   maxHp: number;
 }
 export interface GameState {
-  version: 4;
+  version: 5;
   money: number;
   earned: number;
   caught: number;
@@ -32,7 +32,10 @@ export interface GameState {
   maxStamina: number;
   castTick: number;
   levels: Record<SkillId, number>;
-  rod: boolean;
+  rod: number;
+  ownedRods: number[];
+  spawnClock: number;
+  nextFishId: number;
   fish: Fish[];
   collection: number[];
   player: { x: number; y: number };
@@ -47,6 +50,7 @@ export interface Stats {
   tickMs: number;
   radius: number;
   spawnRates: number[];
+  spawnMs: number;
 }
 export type GameEvent = {
   type: "hit" | "catch";
@@ -80,7 +84,7 @@ export function getStats(state: GameState, balance: Balance): Stats {
     ),
     damage:
       (balance.base.damage + level("damage") * balance.skills.damage.amount) *
-      (state.rod ? balance.rod.multiplier : 1),
+      balance.rods[state.rod].multiplier,
     tickMs: Math.max(
       80,
       balance.base.tickMs *
@@ -91,6 +95,7 @@ export function getStats(state: GameState, balance: Balance): Stats {
       balance.base.radius + level("radius") * balance.skills.radius.amount,
     ),
     spawnRates: [100 - advancedRate, ...spawnRates],
+    spawnMs: balance.base.spawnMs,
   };
 }
 export function skillCost(
@@ -115,9 +120,9 @@ export function skillRequirement(id: SkillId, state: GameState): string | null {
   if (id === "perch" && state.levels.population < 3)
     return "Requires Pond life level 3";
   if (id === "koi" && state.levels.perch < 1)
-    return "Requires Sunset perch level 1";
+    return "Requires River perch level 1";
   if (id === "trout" && state.levels.koi < 1)
-    return "Requires Rosefin koi level 1";
+    return "Requires Mirror carp level 1";
   return null;
 }
 export function spawnCapReached(
@@ -153,77 +158,134 @@ export function purchaseSkill(
   state.levels[id]++;
   return true;
 }
-export function purchaseRod(state: GameState, balance: Balance): boolean {
-  if (!state.inCamp || state.rod || state.money < balance.rod.cost)
+export function purchaseRod(
+  state: GameState,
+  balance: Balance,
+  index: number,
+): boolean {
+  const rod = balance.rods[index];
+  if (!state.inCamp || !Number.isInteger(index) || !rod || state.rod === index)
     return false;
-  state.money -= balance.rod.cost;
-  state.rod = true;
+  if (!state.ownedRods.includes(index)) {
+    if (state.money < rod.cost) return false;
+    state.money = Math.round((state.money - rod.cost) * 100) / 100;
+    state.ownedRods.push(index);
+  }
+  state.rod = index;
   return true;
 }
-/** Refill an empty pond without starting a new trip or restoring stamina. */
-function refillPond(
+
+/** Sample across the pond and favor open water instead of clustering at its center. */
+function spawnPosition(
+  state: GameState,
+  random: () => number,
+): { x: number; y: number } {
+  let best = { x: 200, y: 320 };
+  let clearance = -1;
+  const start = Math.floor(random() * 32);
+  for (let n = 0; n < 32; n++) {
+    const cell = (start + n) % 32;
+    const x = 130 + (((cell % 8) + random()) / 8) * 1020;
+    const y = 180 + ((Math.floor(cell / 8) + random()) / 4) * 240;
+    if (x > 820 && y < 245) continue;
+    const distance = state.fish.reduce(
+      (nearest, fish) =>
+        Math.min(nearest, Math.hypot((x - fish.x) * 0.5, y - fish.y)),
+      Infinity,
+    );
+    if (distance > clearance) {
+      best = { x, y };
+      clearance = distance;
+    }
+  }
+  return best;
+}
+
+function spawnFish(
   state: GameState,
   balance: Balance,
   random = Math.random,
 ): void {
   const stats = getStats(state, balance);
-  const firstPositions = [
-    [330, 300],
-    [890, 375],
-    [660, 225],
-  ];
-  state.fish = Array.from({ length: stats.population }, (_, i) => {
-    let roll = random() * 100;
-    let species = 0;
-    for (let j = 0; j < stats.spawnRates.length; j++) {
-      roll -= stats.spawnRates[j];
-      if (roll < 0) {
-        species = j;
-        break;
-      }
+  let roll = random() * 100;
+  let species = 0;
+  for (let j = 0; j < stats.spawnRates.length; j++) {
+    roll -= stats.spawnRates[j];
+    if (roll < 0) {
+      species = j;
+      break;
     }
-    const fish = balance.species[species];
-    const position =
-      stats.population <= 3
-        ? firstPositions[i]
-        : [200 + random() * 880, 195 + random() * 215];
-    // Reserve space for the trip card, including on narrow screens. A fish must
-    // never require hovering through an opaque interface element to catch it.
-    if (position[0] > 770 && position[1] < 320)
-      position[1] = 320 + random() * 90;
-    if (position[0] < 480 && position[1] < 280)
-      position[1] = 280 + random() * 130;
-    return {
-      id: state.trip * 1000 + state.tripTotal + i,
-      species,
-      x: position[0],
-      y: position[1],
-      phase: random() * Math.PI * 2,
-      hp: fish.hp,
-      maxHp: fish.hp,
-    };
+  }
+  const fish = balance.species[species];
+  state.fish.push({
+    id: state.nextFishId++,
+    species,
+    ...spawnPosition(state, random),
+    phase: random() * Math.PI * 2,
+    hp: fish.hp,
+    maxHp: fish.hp,
   });
-  state.tripTotal += stats.population;
+  state.tripTotal++;
 }
-export function spawnTrip(
+
+/** Active play only: menus and hidden tabs never call this clock. */
+export function tickPond(
   state: GameState,
   balance: Balance,
+  dt: number,
   random = Math.random,
+): boolean {
+  if (!Number.isFinite(dt) || dt < 0) return false;
+  const before = state.fish.length;
+  if (!state.fish.length) spawnFish(state, balance, random);
+  const stats = getStats(state, balance);
+  if (state.fish.length >= stats.population) {
+    state.spawnClock = 0;
+  } else {
+    state.spawnClock = Math.round((state.spawnClock + dt * 1000) * 1000) / 1000;
+    while (
+      state.spawnClock >= stats.spawnMs &&
+      state.fish.length < stats.population
+    ) {
+      state.spawnClock -= stats.spawnMs;
+      spawnFish(state, balance, random);
+    }
+    if (state.fish.length >= stats.population) state.spawnClock = 0;
+  }
+  return state.fish.length !== before;
+}
+
+function beginTrip(
+  state: GameState,
+  balance: Balance,
+  random: () => number,
 ): void {
-  state.tripTotal = 0;
+  state.tripTotal = state.fish.length;
   state.tripCaught = 0;
   state.stamina = getStats(state, balance).stamina;
   state.maxStamina = state.stamina;
   state.castTick = 0;
   state.restockReady = false;
-  refillPond(state, balance, random);
+  if (!state.fish.length) spawnFish(state, balance, random);
+}
+/** Explicit developer restock; normal travel preserves the pond. */
+export function spawnTrip(
+  state: GameState,
+  balance: Balance,
+  random = Math.random,
+): void {
+  state.fish = [];
+  state.spawnClock = 0;
+  beginTrip(state, balance, random);
+  while (state.fish.length < getStats(state, balance).population)
+    spawnFish(state, balance, random);
 }
 export function newGame(
   balance: Balance = DEFAULT_BALANCE,
   random = Math.random,
 ): GameState {
   const state: GameState = {
-    version: 4,
+    version: 5,
     money: 0,
     earned: 0,
     caught: 0,
@@ -243,7 +305,10 @@ export function newGame(
       koi: 0,
       trout: 0,
     },
-    rod: false,
+    rod: 0,
+    ownedRods: [0],
+    spawnClock: 0,
+    nextFishId: 1,
     fish: [],
     collection: [0, 0, 0, 0],
     player: { ...LAKE_START },
@@ -251,7 +316,7 @@ export function newGame(
     restockReady: false,
     playedSeconds: 0,
   };
-  spawnTrip(state, balance, random);
+  beginTrip(state, balance, random);
   return state;
 }
 export function enterCamp(state: GameState): void {
@@ -267,7 +332,7 @@ export function enterLake(
   state.inCamp = false;
   if (state.restockReady) {
     state.trip++;
-    spawnTrip(state, balance, random);
+    beginTrip(state, balance, random);
   }
 }
 export function fishPosition(
@@ -279,6 +344,23 @@ export function fishPosition(
     y: fish.y + Math.sin(time * 0.42 + fish.phase) * 9,
   };
 }
+/** Zero is a submerged silhouette; one is fully at the surface. */
+export function fishReveal(fish: Fish): number {
+  return Math.max(0, Math.min(1, 1 - fish.hp / fish.maxHp));
+}
+export function insideCast(
+  target: { x: number; y: number },
+  pointer: { x: number; y: number },
+  radius: number,
+  yCorrection = 1,
+): boolean {
+  const vertical =
+    Number.isFinite(yCorrection) && yCorrection > 0 ? yCorrection : 1;
+  return (
+    Math.hypot(target.x - pointer.x, (target.y - pointer.y) / vertical) <=
+    radius
+  );
+}
 /** One shared cast tick damages every target and spends exactly one stamina. */
 export function tickFishing(
   state: GameState,
@@ -286,6 +368,7 @@ export function tickFishing(
   dt: number,
   pointer: { x: number; y: number } | null,
   random = Math.random,
+  castYCorrection = 1,
 ): GameEvent[] {
   const events: GameEvent[] = [];
   const stats = getStats(state, balance);
@@ -294,10 +377,7 @@ export function tickFishing(
     !state.inCamp && atFishingSpot(state.player) && pointer && state.stamina > 0
       ? state.fish.filter((fish) => {
           const pos = fishPosition(fish, state.playedSeconds);
-          return (
-            Math.hypot(pos.x - pointer.x, pos.y - pointer.y) <=
-            stats.radius + 12
-          );
+          return insideCast(pos, pointer, stats.radius + 12, castYCorrection);
         })
       : [];
   if (!targets.length) {
@@ -338,15 +418,14 @@ export function tickFishing(
   state.fish = state.fish.filter((fish) => fish.hp > 0);
   if (state.stamina === 0 || targets.every((fish) => fish.hp === 0))
     state.castTick = 0;
-  if (!state.fish.length && state.stamina > 0)
-    refillPond(state, balance, random);
+  if (!state.fish.length) spawnFish(state, balance, random);
   return events;
 }
 export function reconcileBalance(state: GameState, balance: Balance): void {
   for (const id of SKILL_IDS)
     state.levels[id] = Math.min(state.levels[id], balance.skills[id].max);
   // A live balance edit may increase effects. Retain whole levels within the
-  // shared cap, in tree order, so the minnow always keeps at least 20%.
+  // shared cap, in tree order, so the herring always keeps at least 20%.
   let remaining = SPAWN_CAP;
   for (const id of SPAWN_SKILLS) {
     state.levels[id] = Math.min(
@@ -361,6 +440,7 @@ export function reconcileBalance(state: GameState, balance: Balance): void {
     fish.hp = Math.max(0.01, fraction * fish.maxHp);
   }
   state.castTick = Math.min(state.castTick, getStats(state, balance).tickMs);
+  state.spawnClock = Math.min(state.spawnClock, balance.base.spawnMs);
 }
 const finite = (n: unknown, min: number, max: number): n is number =>
   typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
@@ -371,17 +451,35 @@ export function parseSave(
 ): GameState | null {
   if (!raw) return null;
   try {
-    const s = JSON.parse(raw) as Omit<GameState, "version"> & {
+    const s = JSON.parse(raw) as Omit<GameState, "version" | "rod"> & {
       version: number;
+      rod: number | boolean;
     };
     if (
       !s ||
-      ![1, 2, 3, 4].includes(s.version) ||
+      ![1, 2, 3, 4, 5].includes(s.version) ||
       !s.levels ||
       !s.player ||
-      typeof s.rod !== "boolean" ||
+      (s.version < 5 && typeof s.rod !== "boolean") ||
       typeof s.inCamp !== "boolean" ||
       typeof s.restockReady !== "boolean"
+    )
+      return null;
+    if (
+      s.version >= 5 &&
+      (!finite(s.rod, 0, balance.rods.length - 1) ||
+        !Number.isInteger(s.rod) ||
+        !Array.isArray(s.ownedRods) ||
+        !s.ownedRods.includes(0) ||
+        !s.ownedRods.includes(s.rod) ||
+        new Set(s.ownedRods).size !== s.ownedRods.length ||
+        !s.ownedRods.every(
+          (id) =>
+            finite(id, 0, balance.rods.length - 1) && Number.isInteger(id),
+        ) ||
+        !finite(s.spawnClock, 0, 3600000) ||
+        !finite(s.nextFishId, 1, 1e15) ||
+        !Number.isInteger(s.nextFishId))
     )
       return null;
     if (s.version >= 3) {
@@ -410,7 +508,7 @@ export function parseSave(
       !finite(
         s.tripTotal,
         1,
-        s.version >= 3 ? (s.maxStamina + 1) * 150 : 150,
+        s.version >= 5 ? 1e15 : s.version >= 3 ? (s.maxStamina + 1) * 150 : 150,
       ) ||
       !Number.isInteger(s.tripTotal)
     )
@@ -471,7 +569,11 @@ export function parseSave(
         !Number.isInteger(f.id) ||
         !finite(f.species, 0, 3) ||
         !Number.isInteger(f.species) ||
-        !finite(f.x, legacy ? 1150 : 180, legacy ? 1880 : 1100) ||
+        !finite(
+          f.x,
+          legacy ? 1150 : s.version >= 5 ? 130 : 180,
+          legacy ? 1880 : s.version >= 5 ? 1150 : 1100,
+        ) ||
         !finite(f.y, legacy ? 160 : 180, legacy ? 610 : 430) ||
         !finite(f.phase, 0, Math.PI * 2) ||
         !finite(f.hp, 0.0001, 100000) ||
@@ -480,6 +582,7 @@ export function parseSave(
         return null;
       ids.add(f.id);
     }
+    if (s.version >= 5 && s.fish.some((f) => f.id >= s.nextFishId)) return null;
     if (legacy) {
       // Keep the wallet, upgrades and partial trip when moving the old map south.
       s.player = { ...(s.inCamp ? CAMP_START : LAKE_START) };
@@ -492,7 +595,14 @@ export function parseSave(
     }
     const state: GameState = {
       ...s,
-      version: 4,
+      version: 5,
+      rod: s.version < 5 ? (s.rod ? 4 : 0) : (s.rod as number),
+      ownedRods: s.version < 5 ? (s.rod ? [0, 4] : [0]) : s.ownedRods,
+      spawnClock: s.version < 5 ? 0 : s.spawnClock,
+      nextFishId:
+        s.version < 5
+          ? Math.max(0, ...s.fish.map((f) => f.id)) + 1
+          : s.nextFishId,
       stamina: s.version >= 3 ? s.stamina : balance.base.stamina,
       maxStamina: s.version >= 3 ? s.maxStamina : balance.base.stamina,
       castTick: s.version >= 3 ? s.castTick : 0,
@@ -508,8 +618,7 @@ export function parseSave(
       })),
     };
     reconcileBalance(state, balance);
-    if (!state.inCamp && !state.fish.length && state.stamina > 0)
-      refillPond(state, balance);
+    if (!state.fish.length) spawnFish(state, balance);
     return state;
   } catch {
     return null;

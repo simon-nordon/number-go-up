@@ -3,6 +3,7 @@ import type { Balance } from "./config.ts";
 import {
   atFishingSpot,
   BUILDING_PLOTS,
+  canvasYCorrection,
   cameraYFor,
   CAMP_ENTRY_Y,
   CAMP_START,
@@ -12,6 +13,8 @@ import {
   LAKE_START,
   shoreY,
   STATIONS,
+  screenToViewPoint,
+  TOUCH_AIM_OFFSET,
   VIEW_H,
   VIEW_W,
   walkingRoute,
@@ -22,8 +25,11 @@ import {
   enterCamp,
   enterLake,
   fishPosition,
+  fishReveal,
   getStats,
+  insideCast,
   tickFishing,
+  tickPond,
   type GameEvent,
   type GameState,
 } from "./model.ts";
@@ -64,6 +70,7 @@ export class World {
   private terrain: HTMLCanvasElement;
   private assets: Assets;
   private sprites: Record<string, HTMLCanvasElement> = {};
+  private fishDepths = new Map<number, number>();
   private decorations: Decoration[] = [];
   private particles: Particle[] = [];
   private direction = 3;
@@ -81,6 +88,15 @@ export class World {
         1.85,
         this.canvas.clientWidth / this.canvas.clientHeight / (VIEW_W / VIEW_H),
       ),
+    );
+  }
+  private get overlayYScale(): number {
+    return canvasYCorrection(this.canvas.clientWidth, this.canvas.clientHeight);
+  }
+  private get fishScale(): number {
+    return Math.max(
+      1,
+      Math.min(1.6, 640 / Math.max(1, this.canvas.clientWidth)),
     );
   }
 
@@ -103,6 +119,17 @@ export class World {
     this.direction = state.inCamp ? 0 : 3;
     for (const [key, image] of Object.entries(assets))
       if (/^(Tree|Bush|Flower)/.test(key)) this.sprites[key] = this.trim(image);
+    for (const species of balance.species) {
+      const key = `pond-fish-${species.sprite}`;
+      const shadow = document.createElement("canvas");
+      shadow.width = shadow.height = 32;
+      const ctx = shadow.getContext("2d")!;
+      ctx.drawImage(assets[key], 0, 0);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = "#062b37";
+      ctx.fillRect(0, 0, 32, 32);
+      this.sprites[`${key}-shadow`] = shadow;
+    }
     this.buildTerrain();
     this.buildDecorations();
     canvas.addEventListener("pointermove", (e) => this.updatePointer(e));
@@ -183,16 +210,23 @@ export class World {
     this.cameraY = cameraYFor(state.player);
     this.direction = state.inCamp ? 0 : 3;
     this.particles = [];
+    this.fishDepths.clear();
   }
   get targetFish(): number | null {
     return this.hoveredFish;
   }
   private updatePointer(e: PointerEvent): void {
     const rect = this.canvas.getBoundingClientRect();
-    this.pointer = {
-      x: ((e.clientX - rect.left) / rect.width) * VIEW_W,
-      y: ((e.clientY - rect.top) / rect.height) * VIEW_H,
-    };
+    const liftTouchAim =
+      e.pointerType === "touch" &&
+      !this.state.inCamp &&
+      atFishingSpot(this.state.player);
+    this.pointer = screenToViewPoint(
+      e.clientX,
+      e.clientY,
+      rect,
+      liftTouchAim ? TOUCH_AIM_OFFSET : 0,
+    );
   }
   worldPointer(): Point | null {
     return this.pointer
@@ -571,17 +605,33 @@ export class World {
       this.state.playedSeconds += dt;
       this.waterTime += dt;
       this.updateMovement(dt);
+      const arrived = tickPond(this.state, this.balance, dt);
       const events = tickFishing(
         this.state,
         this.balance,
         dt,
         this.worldPointer(),
+        Math.random,
+        this.overlayYScale,
       );
       for (const event of events) {
         this.particle(event);
         this.onEvent(event);
       }
-      if (events.length) this.onChange();
+      if (events.length || arrived) this.onChange();
+      for (const fish of this.state.fish) {
+        const target = fishReveal(fish);
+        const previous = this.fishDepths.get(fish.id) ?? target;
+        this.fishDepths.set(
+          fish.id,
+          this.reducedMotion
+            ? target
+            : previous + (target - previous) * Math.min(1, dt * 5),
+        );
+      }
+      for (const id of this.fishDepths.keys())
+        if (!this.state.fish.some((fish) => fish.id === id))
+          this.fishDepths.delete(id);
     }
     const cameraTarget = cameraYFor(this.state.player);
     this.cameraY += (cameraTarget - this.cameraY) * Math.min(1, dt * 5);
@@ -598,19 +648,17 @@ export class World {
     requestAnimationFrame(this.frame);
   };
   private particle(event: GameEvent): void {
-    this.particles.push({
-      x: event.x,
-      y: event.y - 25,
-      vx: 0,
-      vy: -27,
-      life: 1.15,
-      maxLife: 1.15,
-      color: event.type === "catch" ? "#ffe5a0" : "#fff9e8",
-      text:
-        event.type === "catch"
-          ? `+$${event.amount}`
-          : `−${Number(event.amount.toFixed(1))}`,
-    });
+    if (event.type === "catch")
+      this.particles.push({
+        x: event.x,
+        y: event.y - 25,
+        vx: 0,
+        vy: -27,
+        life: 1.15,
+        maxLife: 1.15,
+        color: "#ffe5a0",
+        text: `+$${event.amount.toLocaleString("en-US")}`,
+      });
     if (!this.reducedMotion)
       for (let i = 0; i < (event.type === "catch" ? 13 : 4); i++)
         this.particles.push({
@@ -684,7 +732,7 @@ export class World {
     if (!this.state.inCamp && atFishingSpot(p) && !this.moving) {
       const point = this.worldPointer();
       c.lineWidth = 3;
-      c.strokeStyle = this.state.rod ? "#e2c784" : "#6b4535";
+      c.strokeStyle = this.state.rod > 0 ? "#e2c784" : "#6b4535";
       c.beginPath();
       c.moveTo(p.x + 8, p.y - 18);
       c.lineTo(p.x + 34, p.y - 62);
@@ -753,7 +801,9 @@ export class World {
       }
     }
     const stats = getStats(this.state, this.balance),
-      pointer = this.worldPointer();
+      pointer = this.worldPointer(),
+      overlayYScale = this.overlayYScale,
+      fishScale = this.fishScale;
     this.hoveredFish = null;
     for (const fish of this.state.fish) {
       const pos = fishPosition(fish, this.state.playedSeconds);
@@ -763,60 +813,61 @@ export class World {
         !this.state.inCamp &&
         this.state.stamina > 0 &&
         atFishingSpot(this.state.player) &&
-        Math.hypot(pos.x - pointer.x, pos.y - pointer.y) <= stats.radius + 12;
+        insideCast(pos, pointer, stats.radius + 12, overlayYScale);
       if (active) this.hoveredFish = fish.id;
-      c.fillStyle = "#1e56655a";
-      c.beginPath();
-      c.ellipse(pos.x, pos.y + 9, 23, 6, 0, 0, Math.PI * 2);
-      c.fill();
-      c.strokeStyle = active ? "#d7ecd08a" : "#8dcac271";
-      c.lineWidth = 2;
-      c.beginPath();
-      c.ellipse(
-        pos.x,
-        pos.y + 10,
-        34 + Math.sin(time * 1.7 + fish.phase) * 3,
-        9,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      c.stroke();
       const species = this.balance.species[fish.species];
-      const animation = Math.floor(time * 2.5 + fish.phase) % 3;
+      const reveal = this.fishDepths.get(fish.id) ?? fishReveal(fish);
+      const key = `pond-fish-${species.sprite}`;
       c.save();
       c.translate(Math.round(pos.x), Math.round(pos.y));
+      c.scale(fishScale, fishScale * overlayYScale);
+      // An exact alpha mask retains each fish's silhouette beneath the water.
+      // Damage raises it smoothly, revealing the original pixel colors.
+      const size = 72 + reveal * 12;
+      c.save();
       if (Math.cos(fish.phase) > 0) c.scale(-1, 1);
+      c.rotate(0.6 + Math.sin(time * 1.5 + fish.phase) * 0.035);
+      c.globalAlpha = 0.82 - reveal * 0.35;
       c.drawImage(
-        this.assets[`fish-${species.sprite}`],
-        animation * 32,
-        0,
-        32,
-        32,
-        -48,
-        -51 * this.spriteYScale,
-        96,
-        96 * this.spriteYScale,
+        this.sprites[`${key}-shadow`],
+        -size / 2 + reveal * 5,
+        -size / 2 + 6,
+        size,
+        size,
+      );
+      c.globalAlpha = Math.pow(reveal, 0.7);
+      c.drawImage(
+        this.assets[key],
+        -size / 2,
+        -size / 2 - reveal * 5,
+        size,
+        size,
       );
       c.restore();
-      if (active || fish.hp < fish.maxHp) {
-        c.fillStyle = "#234e50";
-        c.fillRect(pos.x - 24, pos.y + 25, 48, 7);
-        c.fillStyle = "#c8d68e";
-        c.fillRect(pos.x - 22, pos.y + 27, (44 * fish.hp) / fish.maxHp, 3);
-      }
-      if (active) {
-        const label = `${species.name} · $${species.value}`;
-        c.font = "16px Pixelify, monospace";
-        c.textAlign = "center";
-        const width = c.measureText(label).width + 20;
-        c.fillStyle = "#25494c";
+      if (reveal > 0) {
+        c.globalAlpha = reveal * 0.5;
+        c.strokeStyle = "#b8e1d8";
+        c.lineWidth = 1.5;
         c.beginPath();
-        c.rect(pos.x - width / 2, pos.y - 52, width, 24);
-        c.fill();
-        c.fillStyle = "#f5f0d9";
-        c.fillText(label, pos.x, pos.y - 36);
+        c.ellipse(
+          0,
+          10,
+          39 + Math.sin(time * 1.7 + fish.phase) * 3,
+          13,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        c.stroke();
       }
+      c.globalAlpha = 1;
+      if (active || fish.hp < fish.maxHp) {
+        c.fillStyle = "#0c2935";
+        c.fillRect(-24, 36, 48, 6);
+        c.fillStyle = "#a4d2bd";
+        c.fillRect(-22, 38, (44 * fish.hp) / fish.maxHp, 2);
+      }
+      c.restore();
     }
     const decorations = [...this.decorations].sort((a, b) => a.y - b.y);
     let drawn = false;
@@ -851,20 +902,23 @@ export class World {
       this.state.stamina > 0 &&
       atFishingSpot(this.state.player)
     ) {
+      c.save();
+      c.translate(pointer.x, pointer.y);
+      c.scale(1, overlayYScale);
       c.lineWidth = 1.5;
       c.strokeStyle = "#fff5d6bc";
       c.fillStyle = "#fff5d612";
       c.beginPath();
-      c.arc(pointer.x, pointer.y, stats.radius, 0, Math.PI * 2);
+      c.arc(0, 0, stats.radius, 0, Math.PI * 2);
       c.fill();
       c.stroke();
       c.strokeStyle = "#fff2c8";
       c.lineWidth = 2;
       c.beginPath();
-      c.moveTo(pointer.x - 5, pointer.y);
-      c.lineTo(pointer.x + 5, pointer.y);
-      c.moveTo(pointer.x, pointer.y - 5);
-      c.lineTo(pointer.x, pointer.y + 5);
+      c.moveTo(-5, 0);
+      c.lineTo(5, 0);
+      c.moveTo(0, -5);
+      c.lineTo(0, 5);
       c.stroke();
       const target = this.state.fish.find((f) => f.id === this.hoveredFish);
       if (target) {
@@ -872,25 +926,30 @@ export class World {
         c.strokeStyle = "#f7d997";
         c.beginPath();
         c.arc(
-          pointer.x,
-          pointer.y,
+          0,
+          0,
           stats.radius + 4,
           -Math.PI / 2,
           -Math.PI / 2 + (Math.PI * 2 * this.state.castTick) / stats.tickMs,
         );
         c.stroke();
       }
+      c.restore();
     }
     for (const p of this.particles) {
       c.globalAlpha = Math.min(1, (p.life / p.maxLife) * 2);
       c.fillStyle = p.color;
       if (p.text) {
-        c.font = `500 ${p.text.startsWith("+") ? 26 : 20}px Pixelify, monospace`;
+        c.save();
+        c.translate(p.x, p.y);
+        c.scale(fishScale, fishScale * overlayYScale);
+        c.font = "500 26px Pixelify, monospace";
         c.textAlign = "center";
         c.strokeStyle = "#315c57";
         c.lineWidth = 3;
-        c.strokeText(p.text, p.x, p.y);
-        c.fillText(p.text, p.x, p.y);
+        c.strokeText(p.text, 0, 0);
+        c.fillText(p.text, 0, 0);
+        c.restore();
       } else c.fillRect(Math.round(p.x), Math.round(p.y), 4, 4);
     }
     c.globalAlpha = 1;

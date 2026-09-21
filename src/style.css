@@ -645,16 +645,6 @@ kbd {
 .pixel-item.node-fish {
   width: 32px;
   height: 32px;
-  background-size: 480px 320px;
-}
-.pixel-item.node-fish.perch {
-  background-position: -112px 0;
-}
-.pixel-item.node-fish.koi {
-  background-position: -208px 0;
-}
-.pixel-item.node-fish.trout {
-  background-position: -304px 0;
 }
 .spawn-budget {
   color: var(--muted);
@@ -824,129 +814,125 @@ kbd {
   line-height: 1.6;
   margin-top: 12px;
 }
-/* Inventory sprites are shared with the original game art. */
+/* The pack's individual 32px icons keep crisp edges at every UI size. */
 .pixel-item {
   display: inline-block;
   width: 64px;
   height: 64px;
   flex-shrink: 0;
-  background-image: var(--items-url);
-  background-repeat: no-repeat;
-  background-size: 960px 640px;
+  object-fit: contain;
   image-rendering: pixelated;
   vertical-align: middle;
-}
-.pixel-item.rod {
-  background-position: -608px -128px;
-}
-.pixel-item.goldrod {
-  background-position: -704px -128px;
-}
-.pixel-item.fish {
-  background-position: -800px 0;
-}
-.pixel-item.perch {
-  background-position: -224px 0;
-}
-.pixel-item.koi {
-  background-position: -416px 0;
-}
-.pixel-item.trout {
-  background-position: -608px 0;
 }
 .pixel-item.large {
   width: 96px;
   height: 96px;
-  background-size: 1440px 960px;
 }
-.pixel-item.large.goldrod {
-  background-position: -1056px -192px;
+.shop-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  overflow: hidden;
 }
-.pixel-item.large.fish {
-  background-position: -1200px 0;
+.shop-dialog .dialog-heading,
+.shop-dialog .dialog-footer {
+  flex-shrink: 0;
 }
-.pixel-item.large.perch {
-  background-position: -336px 0;
+.shop-intro {
+  margin: 0;
+  padding: 12px 24px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
-.pixel-item.large.koi {
-  background-position: -624px 0;
-}
-.pixel-item.large.trout {
-  background-position: -912px 0;
-}
-.rod-product {
+.rod-catalog {
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 28px;
-  gap: 28px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 24px 24px;
+  align-content: start;
 }
-.rod-illustration {
+.rod-card {
+  border: 1px solid #3f5356;
+  background: #182a33;
+  min-width: 0;
+}
+.rod-card.equipped {
+  border-color: var(--green);
+  background: #1b3538;
+}
+.rod-art {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 270px;
-  background-color: #13242b;
-  background-image:
-    linear-gradient(#c4c99608 1px, transparent 1px),
-    linear-gradient(90deg, #c4c99608 1px, transparent 1px);
-  background-size: 20px 20px;
-  border: 1px solid #48584a;
+  height: 140px;
+  background:
+    radial-gradient(ellipse at 50% 70%, #3e555035, transparent 70%), #11222b;
+  border-bottom: 1px solid #33494d;
 }
-.rod-illustration .pixel-item {
-  transform: scale(1.8);
-}
-.rod-illustration .eyebrow {
+.rod-tier {
   position: absolute;
-  bottom: 22px;
-  color: var(--gold);
+  top: 10px;
+  left: 12px;
+  color: #71878a;
+  font: 14px var(--pixel);
 }
-.rod-spark {
-  position: absolute;
-  color: var(--gold);
-  font-size: 22px;
+.rod-info {
+  padding: 14px;
 }
-.rod-spark.one {
-  top: 25%;
-  right: 22%;
+.rod-info h3 {
+  margin: 0 0 8px;
+  font: 23px/1.1 var(--pixel);
+  color: var(--ink);
 }
-.rod-spark.two {
-  bottom: 25%;
-  left: 25%;
-}
-.rod-description {
-  padding: 8px 0;
-}
-.rod-description h3 {
-  font: 32px var(--pixel);
-  margin: 8px 0 24px;
-  color: var(--gold);
-}
-.rod-perk {
+.rod-power {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 0;
-  margin-bottom: 18px;
+  gap: 7px;
   color: var(--green);
+  font: 16px var(--pixel);
+  margin-bottom: 16px;
 }
-.rod-perk strong,
-.rod-perk small {
-  display: block;
-}
-.rod-perk strong {
+.rod-card .purchase-button {
+  min-height: 42px;
+  padding: 8px 10px;
   font-size: 15px;
 }
-.rod-perk small {
-  font-size: 11px;
-  margin-top: 7px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.shop-progress {
-  margin-top: 15px;
-}
-.shop-progress > span {
-  background: var(--gold);
+@media (max-width: 650px) {
+  .shop-dialog[open] {
+    width: calc(100vw - 12px);
+    height: calc(100dvh - 12px);
+    max-height: calc(100dvh - 12px);
+  }
+  .shop-intro {
+    padding: 10px 14px;
+  }
+  .rod-catalog {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 0 12px 14px;
+  }
+  .rod-art {
+    height: 112px;
+  }
+  .rod-art .pixel-item {
+    width: 80px;
+    height: 80px;
+  }
+  .rod-info {
+    padding: 10px;
+  }
+  .rod-info h3 {
+    font-size: 20px;
+    min-height: 44px;
+  }
+  .rod-card .purchase-button {
+    font-size: 13px;
+    gap: 4px;
+  }
 }
 .loadout {
   padding: 12px 24px;
@@ -1009,8 +995,8 @@ kbd {
   margin-bottom: 14px;
 }
 .fish-entry.undiscovered .pixel-item {
-  filter: grayscale(1);
-  opacity: 0.45;
+  filter: brightness(0);
+  opacity: 0.55;
 }
 .portrait-lock {
   position: absolute;
@@ -1510,29 +1496,6 @@ kbd {
   }
   .purchase-note {
     margin-bottom: 8px;
-  }
-  .rod-product {
-    grid-template-columns: 1fr;
-    padding: 18px;
-    gap: 20px;
-  }
-  .rod-illustration {
-    min-height: 160px;
-  }
-  .rod-illustration .pixel-item {
-    transform: scale(1.3);
-  }
-  .rod-illustration .eyebrow {
-    bottom: 10px;
-  }
-  .rod-description h3 {
-    margin-bottom: 12px;
-  }
-  .rod-description {
-    padding: 0;
-  }
-  .rod-perk {
-    margin-bottom: 12px;
   }
   .dialog-footer {
     padding: 8px 18px;

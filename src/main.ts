@@ -80,9 +80,15 @@ const num = (n: number): string =>
 const assetUrl = (name: string) =>
   `${import.meta.env.BASE_URL}assets/${name}.png`;
 const item = (
-  kind: "rod" | "goldrod" | "fish" | "perch" | "koi" | "trout",
+  kind: "fish" | "perch" | "koi" | "trout" | number,
   size = "normal",
-) => `<span class="pixel-item ${kind} ${size}" aria-hidden="true"></span>`;
+) => {
+  const name =
+    typeof kind === "number"
+      ? `rod-${balance.rods[kind].sprite}`
+      : `pond-fish-${balance.species[["fish", "perch", "koi", "trout"].indexOf(kind)].sprite}`;
+  return `<img class="pixel-item ${size}" src="${assetUrl(name)}" alt="" width="64" height="64" />`;
+};
 
 app.innerHTML = `
   <main class="game-shell">
@@ -194,11 +200,13 @@ function openDialog(name: string, content: string, wide = false): void {
     modal.open && document.activeElement instanceof HTMLButtonElement
       ? document.activeElement
       : null;
-  const focusSelector = activeButton?.dataset.skill
-    ? `[data-skill="${activeButton.dataset.skill}"]`
-    : activeButton?.dataset.action
-      ? `[data-action="${activeButton.dataset.action}"]`
-      : null;
+  const focusSelector = activeButton?.dataset.rod
+    ? `[data-rod="${activeButton.dataset.rod}"]`
+    : activeButton?.dataset.skill
+      ? `[data-skill="${activeButton.dataset.skill}"]`
+      : activeButton?.dataset.action
+        ? `[data-action="${activeButton.dataset.action}"]`
+        : null;
   if (!modal.open)
     returnFocus =
       document.activeElement instanceof HTMLElement
@@ -260,7 +268,7 @@ function skillEffect(id: SkillId, next = false): string {
     return `${stats.spawnRates[SPAWN_SKILLS.indexOf(id) + 1]}% spawn`;
   switch (id) {
     case "population":
-      return `${stats.population} fish / school`;
+      return `${stats.population} fish capacity`;
     case "damage":
       return `${num(stats.damage)} damage / tick`;
     case "speed":
@@ -322,29 +330,41 @@ function openShop(): void {
     world.goTo("shop");
     return;
   }
-  const affordable = state.money >= balance.rod.cost;
+  const scrollTop = modal.querySelector(".rod-catalog")?.scrollTop ?? 0;
   openDialog(
     "shop",
     `${shopHeader("Rod shop", "bag")}
-    <div class="rod-product"><div class="rod-illustration">${item("goldrod", "large")}<span class="rod-spark one">✦</span><span class="rod-spark two">✧</span><span class="eyebrow">MASTERWORK</span></div><div class="rod-description"><span class="level-tag">EQUIPMENT</span><h3>The gilded reed</h3><div class="rod-perk">${icon("hook", 21)}<span><strong>${num(balance.rod.multiplier)}× total damage</strong><small>Multiplies your hook upgrades, too.</small></span></div><button class="primary-button purchase-button" data-action="buy-rod" ${state.rod || !affordable ? "disabled" : ""}>${state.rod ? `${icon("check", 18)} Equipped` : `Equip rod <strong>${money(balance.rod.cost)}</strong>`}</button><span class="balance-note">${state.rod ? "Rod equipped." : `${money(state.money)} saved of ${money(balance.rod.cost)}`}</span><div class="shop-progress"><span style="width:${Math.min(100, (state.money / balance.rod.cost) * 100)}%"></span></div></div></div>
+    <p class="shop-intro">Find your next favorite. Every rod multiplies your hook damage.</p>
+    <div class="rod-catalog">${balance.rods
+      .map((rod, index) => {
+        const owned = state.ownedRods.includes(index),
+          equipped = state.rod === index;
+        return `<article class="rod-card ${equipped ? "equipped" : ""}">
+        <div class="rod-art">${item(index, "large")}<span class="rod-tier">${String(index + 1).padStart(2, "0")}</span></div>
+        <div class="rod-info"><h3>${rod.name}</h3><span class="rod-power">${icon("hook", 16)} ${num(rod.multiplier)}× damage</span>
+        <button class="${owned ? "secondary-button" : "primary-button"} purchase-button" data-action="buy-rod" data-rod="${index}" ${equipped || (!owned && state.money < rod.cost) ? "disabled" : ""} aria-label="${equipped ? "Equipped" : owned ? "Equip" : "Buy"} ${rod.name}${owned ? "" : ` for ${money(rod.cost)}`}" >${equipped ? `${icon("check", 16)} Equipped` : owned ? "Equip" : `Buy <strong>${money(rod.cost)}</strong>`}</button></div>
+      </article>`;
+      })
+      .join("")}</div>
     <div class="dialog-footer"><span>${icon("check", 14)} Equips automatically.</span><button class="text-button" data-action="back-to-lake">Pond ${icon("up", 16)}</button></div>`,
     true,
   );
+  $(".rod-catalog").scrollTop = scrollTop;
 }
 function openJournal(): void {
   const stats = getStats(state, balance);
   openDialog(
     "journal",
     `${dialogHeader("", "Field guide", `${state.collection.filter((n) => n > 0).length} / 4 species discovered`)}
-    <div class="loadout"><div class="loadout-rod">${item(state.rod ? "goldrod" : "rod")}<span class="eyebrow">EQUIPPED<strong>${state.rod ? "The gilded reed" : "The beginner's rod"}</strong></span></div><div class="loadout-stats"><span>${icon("hook", 16)}<strong>${num(stats.damage)}</strong> damage</span><span>${icon("bolt", 16)}<strong>${(stats.tickMs / 1000).toFixed(2)}s</strong> / tick</span><span>${icon("radius", 16)}<strong>${num(stats.radius)}px</strong> radius</span></div></div>
-    <div class="journal-grid">${balance.species.map((fish, i) => `<article class="fish-entry ${stats.spawnRates[i] === 0 ? "undiscovered" : ""}"><div class="fish-portrait">${item(["fish", "perch", "koi", "trout"][i] as "fish", "large")}${stats.spawnRates[i] === 0 ? `<span class="portrait-lock">${icon("lock", 16)}</span>` : ""}</div><h3>${fish.name}</h3><div class="fish-facts"><span>${icon("coin", 14)} ${money(fish.value)}</span><span>${icon("hook", 14)} ${num(fish.hp)} HP</span></div><div class="journal-count">${stats.spawnRates[i]}% spawn · ${num(state.collection[i])} caught</div></article>`).join("")}</div><div class="journal-summary"><span>ALL-TIME CATCHES<strong>${num(state.caught)}</strong></span><span>TOTAL EARNED<strong>${money(state.earned)}</strong></span><span>FISHING TRIPS<strong>${num(state.trip)}</strong></span></div>`,
+    <div class="loadout"><div class="loadout-rod">${item(state.rod)}<span class="eyebrow">EQUIPPED<strong>${balance.rods[state.rod].name}</strong></span></div><div class="loadout-stats"><span>${icon("hook", 16)}<strong>${num(stats.damage)}</strong> damage</span><span>${icon("bolt", 16)}<strong>${(stats.tickMs / 1000).toFixed(2)}s</strong> / tick</span><span>${icon("radius", 16)}<strong>${num(stats.radius)}</strong> radius</span></div></div>
+    <div class="journal-grid">${balance.species.map((fish, i) => `<article class="fish-entry ${state.collection[i] === 0 ? "undiscovered" : ""}"><div class="fish-portrait">${item(["fish", "perch", "koi", "trout"][i] as "fish", "large")}</div><h3>${state.collection[i] > 0 ? fish.name : "Unknown fish"}</h3><div class="fish-facts">${state.collection[i] > 0 ? `<span>${icon("coin", 14)} ${money(fish.value)}</span><span>${icon("hook", 14)} ${num(fish.hp)} HP</span>` : "Catch to discover"}</div><div class="journal-count">${stats.spawnRates[i]}% spawn · ${num(state.collection[i])} caught</div></article>`).join("")}</div><div class="journal-summary"><span>ALL-TIME CATCHES<strong>${num(state.caught)}</strong></span><span>TOTAL EARNED<strong>${money(state.earned)}</strong></span><span>FISHING TRIPS<strong>${num(state.trip)}</strong></span></div>`,
     true,
   );
 }
 function openSettings(): void {
   openDialog(
     "settings",
-    `${dialogHeader("", "Settings")}<div class="settings-content"><label class="setting-row"><span><strong>Sound effects</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>How to play</h3><p>Use the <b>direction pad</b>, <b>WASD</b>, or <b>arrow keys</b> to move. Tap a path or destination sign to walk there.</p><p>At the end of the dock, <b>hold a fish</b> to catch it, or hover with a mouse. Catches earn coins automatically. Each damage tick uses <b>1 stamina</b>, even when it hits several fish.</p><p>Walk down to base and tap <b>Skills</b> or <b>Rod shop</b> to upgrade. Clearing the pond brings a new school without restoring stamina. At <b>0 stamina</b>, the trip ends. Visit base and return to start a new trip with full stamina. Your progress saves in this browser.</p></div><button class="secondary-button danger-text settings-reset" data-action="reset-progress">Reset all progress</button><div class="credits">CraftPix pixel art · Stillwater<br>Mobile: portrait recommended. Desktop: press E to interact.</div></div>`,
+    `${dialogHeader("", "Settings")}<div class="settings-content"><label class="setting-row"><span><strong>Sound effects</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>How to play</h3><p>Use the <b>direction pad</b>, <b>WASD</b>, or <b>arrow keys</b> to move. Tap a path or destination sign to walk there.</p><p>At the end of the dock, <b>hold a fish</b> to catch it, or hover with a mouse. Catches earn coins automatically. Each damage tick uses <b>1 stamina</b>, even when it hits several fish.</p><p>Walk down to base and tap <b>Skills</b> or <b>Rod shop</b> to upgrade. Fish start as shadows and reveal their colors as you reel them in. One new fish arrives every 10 seconds until the pond is full; catching the last fish immediately brings one replacement. At <b>0 stamina</b>, the trip ends. Visit base and return for full stamina. The fish and their remaining health stay in the pond. Your progress saves in this browser.</p></div><button class="secondary-button danger-text settings-reset" data-action="reset-progress">Reset all progress</button><div class="credits">CraftPix pixel art · Stillwater<br>Mobile: portrait recommended. Desktop: press E to interact.</div></div>`,
   );
   $("#sound-setting").addEventListener("change", (e) => {
     audio.enabled = (e.target as HTMLInputElement).checked;
@@ -371,8 +391,8 @@ function openEditor(): void {
   if (!devMode) return;
   openDialog(
     "editor",
-    `${dialogHeader("DEVELOPER TOOLS · LIVE BALANCE", "Find the sweet spot.", "Changes apply immediately and save to this browser. Population and stamina changes start next trip.")}
-    <form id="balance-form"><div class="editor-scroll"><section class="editor-section"><div class="editor-section-heading"><h3>The starting cast</h3><span>BASE STATS</span></div><div class="editor-fields">${numericField("Starting fish", "base.population", balance.base.population, 1, "1", 100)}${numericField("Starting stamina", "base.stamina", balance.base.stamina, 1, "1", 10000)}${numericField("Damage per tick", "base.damage", balance.base.damage, 0.1, "any", 10000)}${numericField("Tick interval (ms)", "base.tickMs", balance.base.tickMs, 80, "any", 10000)}${numericField("Cursor radius (px)", "base.radius", balance.base.radius, 10, "any", 200)}</div></section>
+    `${dialogHeader("DEVELOPER TOOLS · LIVE BALANCE", "Find the sweet spot.", "Changes apply immediately and save to this browser. Pond capacity changes immediately; stamina changes start next trip.")}
+    <form id="balance-form"><div class="editor-scroll"><section class="editor-section"><div class="editor-section-heading"><h3>The starting cast</h3><span>BASE STATS</span></div><div class="editor-fields">${numericField("Pond capacity", "base.population", balance.base.population, 1, "1", 100)}${numericField("Fish arrival (ms)", "base.spawnMs", balance.base.spawnMs, 100, "any", 3600000)}${numericField("Starting stamina", "base.stamina", balance.base.stamina, 1, "1", 10000)}${numericField("Damage per tick", "base.damage", balance.base.damage, 0.1, "any", 10000)}${numericField("Tick interval (ms)", "base.tickMs", balance.base.tickMs, 80, "any", 10000)}${numericField("Cursor radius (px)", "base.radius", balance.base.radius, 10, "any", 200)}</div></section>
     <section class="editor-section"><div class="editor-section-heading"><h3>Room to grow</h3><span>SKILL COSTS & EFFECTS</span></div><div class="editor-skill-table"><div class="editor-table-head"><span>SKILL</span><span>BASE COST $</span><span>COST ×</span><span>FLAT LEVELS</span><span>EFFECT / LVL</span><span>MAX LVL</span></div>${SKILL_IDS.map(
       (id) => {
         const b = balance.skills[id];
@@ -381,8 +401,14 @@ function openEditor(): void {
     ).join(
       "",
     )}</div><p class="editor-help">Price = base cost × multiplier<sup>max(0, level − max(0, flat levels − 1))</sup>, rounded up to the next $10. Quick hands reduces the interval by its percentage each level; the minimum interval is 80ms. Cast radius caps at 220px; population caps at 150. Stamina caps at 10,000; advanced fish share an 80% cap. Raising spawn effects clamps purchased levels in tree order to stay within that cap.</p></section>
-    <section class="editor-section"><div class="editor-section-heading"><h3>Life in the lake</h3><span>FISH ECONOMY</span></div><div class="editor-fish-grid">${balance.species.map((fish, i) => `<div class="editor-fish"><h4>${fish.name}</h4>${numericField("Health", `species.${i}.hp`, fish.hp, 0.1, "any", 100000)}${numericField("Value ($)", `species.${i}.value`, fish.value, 1)}</div>`).join("")}</div><p class="editor-help">Each species skill adds its percentage to the spawn chance. Advanced fish share an 80% cap; minnows keep the remainder. Existing fish keep their health percentage when health changes.</p></section>
-    <section class="editor-section"><div class="editor-section-heading"><h3>The gilded reed</h3><span>SHOP</span></div><div class="editor-fields two-fields">${numericField("Rod price ($)", "rod.cost", balance.rod.cost, 1, "any", 100000000)}${numericField("Damage multiplier", "rod.multiplier", balance.rod.multiplier, 1, "any", 1000)}</div></section>
+    <section class="editor-section"><div class="editor-section-heading"><h3>Life in the lake</h3><span>FISH ECONOMY</span></div><div class="editor-fish-grid">${balance.species.map((fish, i) => `<div class="editor-fish"><h4>${fish.name}</h4>${numericField("Health", `species.${i}.hp`, fish.hp, 0.1, "any", 100000)}${numericField("Value ($)", `species.${i}.value`, fish.value, 1)}</div>`).join("")}</div><p class="editor-help">Each species skill adds its percentage to the spawn chance. Advanced fish share an 80% cap; herring keep the remainder. Existing fish keep their health percentage when health changes.</p></section>
+    <section class="editor-section"><div class="editor-section-heading"><h3>Rod collection</h3><span>SHOP</span></div><div class="editor-fish-grid">${balance.rods
+      .slice(1)
+      .map(
+        (rod, i) =>
+          `<div class="editor-fish"><h4>${rod.name}</h4>${numericField("Price ($)", `rods.${i + 1}.cost`, rod.cost, 1, "any", 100000000)}${numericField("Damage multiplier", `rods.${i + 1}.multiplier`, rod.multiplier, 1, "any", 1000)}</div>`,
+      )
+      .join("")}</div></section>
     <section class="editor-section sandbox-section"><div><h3>Playtest shortcuts</h3><p>Only changes this save. Keep your balance settings.</p></div><div class="sandbox-buttons"><button type="button" class="secondary-button" data-action="grant">+$1,000</button><button type="button" class="secondary-button" data-action="restock">Restock lake</button><button type="button" class="secondary-button danger-text" data-action="reset-save">New save</button></div></section>
     </div><div class="editor-bottom"><div id="editor-message" role="status">${icon("edit", 14)} Your game is paused while you edit.</div><div class="editor-buttons"><button type="button" class="text-button" data-action="default-balance">Restore defaults</button><button type="button" class="secondary-button" data-action="import-balance">Import</button><button type="button" class="secondary-button" data-action="export-balance">Export JSON</button><button type="submit" class="primary-button">${icon("check", 17)} Apply changes</button></div></div></form><input id="balance-file" type="file" accept=".json,application/json" hidden>`,
     true,
@@ -505,7 +531,7 @@ document.addEventListener("click", (e) => {
       }
       break;
     case "buy-rod":
-      if (purchaseRod(state, balance)) {
+      if (purchaseRod(state, balance, Number(button.dataset.rod))) {
         audio.play("buy");
         save();
         updateUI();
@@ -689,9 +715,3 @@ if (devMode)
       ready: !!world,
     }),
   });
-
-// Keep sprite paths local and bundler-base aware, including subdirectory deployments.
-document.documentElement.style.setProperty(
-  "--items-url",
-  `url("${assetUrl("items")}")`,
-);

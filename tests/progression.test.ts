@@ -83,7 +83,7 @@ test("spawn rolls use exact percentages without a guaranteed advanced fish", () 
   assert.equal(state.fish[0].species, 0);
 });
 
-test("new schools use invested spawn chances without refilling stamina", () => {
+test("the last-fish replacement uses invested spawn chances without refilling stamina", () => {
   const balance = freshBalance(),
     state = newGame(balance);
   state.levels.perch = 1;
@@ -91,7 +91,7 @@ test("new schools use invested spawn chances without refilling stamina", () => {
     Object.assign(f, { x: 700, y: 300, phase: 0, hp: 1 }),
   );
   tickFishing(state, balance, 2, { x: 700, y: 300 }, () => 0.99);
-  assert.equal(state.money, 30);
+  assert.equal(state.money, 10);
   assert.equal(state.stamina, 9);
   assert.equal(state.trip, 1);
   assert.ok(state.fish.every((f) => f.species === 1 && f.hp === 8));
@@ -122,7 +122,7 @@ test("tuning spawn effects cannot exceed the shared cap, including partial remai
 test("old fish unlocks become separate first-level chances without losing an active trip", () => {
   const balance = freshBalance();
   for (let species = 0; species <= 3; species++) {
-    const state = newGame(balance);
+    const state = newGame(balance, () => 0.5);
     state.money = 47;
     state.stamina = 4;
     state.castTick = 350;
@@ -130,11 +130,12 @@ test("old fish unlocks become separate first-level chances without losing an act
     const old = {
       ...state,
       version: 3,
+      rod: false,
       levels: { population: 3, damage: 2, speed: 1, radius: 1, species },
     };
     const restored = parseSave(JSON.stringify(old), balance)!;
     assert.ok(restored);
-    assert.equal(restored.version, 4);
+    assert.equal(restored.version, 5);
     assert.equal(restored.money, 47);
     assert.equal(restored.stamina, 4);
     assert.equal(restored.castTick, 350);
@@ -171,7 +172,7 @@ test("all existing upgrade prices are exactly ten times the previous rounded pri
     SPAWN_SKILLS.map((id) => skillCost(id, 0, balance)),
     [120, 360, 1080],
   );
-  assert.equal(balance.rod.cost, 10000);
+  assert.equal(balance.rods[4].cost, 10000);
   assert.deepEqual(
     balance.species.map((f) => f.value),
     [10, 30, 90, 200],
@@ -194,12 +195,13 @@ test("legacy balance exports migrate currency once and preserve custom settings"
       value: fish.value / 10,
       weight: 65,
     })),
-    rod: { ...balance.rod, cost: 1000 },
+    rods: undefined,
+    rod: { cost: 1000, multiplier: 5 },
   };
   const migrated = validateBalance(old);
   assert.deepEqual(migrated.base, balance.base);
   assert.deepEqual(migrated.species, balance.species);
-  assert.deepEqual(migrated.rod, balance.rod);
+  assert.deepEqual(migrated.rods, balance.rods);
   assert.deepEqual(
     SPAWN_SKILLS.map((id) => migrated.skills[id].cost),
     [240, 480, 960],

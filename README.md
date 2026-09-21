@@ -33,15 +33,15 @@ Each player saves progress in their own browser. The hosted production build has
 
 ## Play the first slice
 
-- Start at the dock with **three silver minnows**, **10 stamina**, **$0**, and a beginner's rod.
-- **Hover over a fish** (or hold it on touch) to deal 1 damage every **2 seconds**. Each shared damage tick costs **1 stamina**, whether it hits one fish or a whole school. Misses, walking, and paused menus cost nothing. Minnows have 4 HP and earn **$10** each.
+- Start at the dock with **one submerged fish**, **10 stamina**, **$0**, and the **Willow twig** rod. The pond initially holds up to **three fish**.
+- **Hover over a fish** (or hold it on touch) to deal 1 damage every **2 seconds**. Each shared damage tick costs **1 stamina**, whether it hits one fish or a whole school. Misses, walking, and paused menus cost nothing. Herring have 4 HP and earn **$10** each. Fish begin as dark silhouettes, then rise and reveal their colors as health drops. There are no name or price labels over fish; a catch displays its **+$ reward**. The field guide reveals each species after its first catch.
 - Move with **WASD / arrows**, or click a walkable path. Walk **down** off the north-facing dock to enter your base; walk **up** to return to the pond. The camera follows vertically. The destination buttons also walk your character there.
-- Click **The old willow**, or press **E** nearby, to open the skill tree. **B** walks to the tree. The first three **Pond life** upgrades cost **$10 each** and each add one fish to each school.
-- Return to the dock for a new trip. With three Pond life levels, **six fish** are waiting. A trip ends at **0 stamina**, even if fish remain. If the pond is cleared with stamina left, a new school appears in the same trip without restoring stamina. Visiting base and returning starts a new trip with full stamina; you can also return early.
+- Click **The old willow**, or press **E** nearby, to open the skill tree. **B** walks to the tree. The first three **Pond life** upgrades cost **$10 each** and each add one space to the pond's capacity.
+- A new fish arrives every **10 seconds** of active play until the pond reaches capacity. With three Pond life levels, it can hold **six fish**. Catching the last fish immediately spawns **one** replacement, even at zero stamina. Fish favor open water across the pond. Visiting base and returning starts a new trip with full stamina while preserving existing fish, damage, and the arrival timer; it never resets the pond.
 - Drag the skill canvas to pan; pinch, scroll, or use the +/− buttons to zoom. The fit button shows the whole tree. Keyboard users can pan with arrows, zoom with +/−, and fit with Home. Buy **More stamina** for **+1 stamina** per level on the next trip, or follow branches for damage, faster ticks, and a larger cast.
-- **Sunset perch**, **Rosefin koi**, and **Golden trout** each have a separate repeatable skill: **+5 percentage points of spawn chance** per purchase. Their combined chance caps at **80%**, leaving minnows at least **20%**. All fish roll independently, with no guaranteed rare spawn. Perch, koi, and trout earn **$30**, **$90**, and **$200** respectively.
+- **River perch**, **Mirror carp**, and **Rainbow trout** each have a separate repeatable skill: **+5 percentage points of spawn chance** per purchase. Their combined chance caps at **80%**, leaving herring at least **20%**. All fish roll independently, with no guaranteed rare spawn. Perch, carp, and trout earn **$30**, **$90**, and **$200** respectively.
 - The base has the **old willow** and **Tackle & twine**, plus **three empty, staked plots** marked “To be revealed” for future buildings.
-- Visit **Tackle & twine** for **The gilded reed**, a **$10,000** rod that multiplies total damage by **5**.
+- Visit **Tackle & twine** to browse all **ten rods** from the medieval fishing pack. Nine upgrades start at **$1,000** (1.5× damage), progressing to **$500,000** (40× damage). **The gilded reed** remains $10,000 / 5×. Purchases equip immediately, and any owned rod can be equipped again for free.
 - Open the book in the corner for your field guide, equipped rod, and fishing stats. **Escape** opens settings or closes a dialog.
 
 The dark pixel interface fills the viewport, with mobile portrait as the primary touch layout. Hold a fish to catch it and use the direction pad or destination signs to move. Desktop users can use keyboard and mouse. Skills and the rod shop show your available coins beside the close button; the pannable skill canvas fills the space above compact upgrade details on phones. The fishing HUD shows only the stamina icon, current/max values, and bar.
@@ -50,7 +50,7 @@ The dark pixel interface fills the viewport, with mobile portrait as the primary
 
 During `npm run dev`, click **Edit balance** or press **F2**. Gameplay pauses while a dialog is open.
 
-The editor changes starting population, starting stamina, base damage, tick interval, cursor radius, skill costs and scaling, effects and level caps, fish HP/value, and the rod's price and multiplier. **Apply changes** saves the balance in this browser. Population and stamina changes take effect on the next trip; existing fish retain their health percentage when you edit HP. Lowering a skill cap clamps its purchased level without refunding coins. Advanced spawn effects are whole percentage points, with an 80% shared cap; raising them clamps levels in perch → koi → trout order to preserve that cap. Upgrade prices round up to the next $10, retaining exactly 10× the original prices.
+The editor changes pond capacity, fish arrival interval, starting stamina, base damage, tick interval, cursor radius, skill costs and scaling, effects and level caps, fish HP/value, and each rod's price and multiplier. **Apply changes** saves the balance in this browser. Capacity changes take effect for new arrivals immediately; stamina changes take effect on the next trip; existing fish retain their health percentage when you edit HP. Lowering a skill cap clamps its purchased level without refunding coins. Advanced spawn effects are whole percentage points, with an 80% shared cap; raising them clamps levels in perch → koi → trout order to preserve that cap. Upgrade prices round up to the next $10, retaining exactly 10× the original prices.
 
 **Export JSON** applies and downloads the current settings. **Import** validates and applies a previously exported file. **Restore defaults** restores the code defaults while keeping the save. Playtest buttons grant $1,000, restock the lake, or reset progress after a confirmation. A new save keeps your custom balance.
 
@@ -58,7 +58,7 @@ The committed defaults live in [`src/config.ts`](src/config.ts). To ship a tuned
 
 ## Saving
 
-Progress saves after stamina is spent, catches, and purchases, on zone changes, every five seconds, and when the page is hidden. Your wallet, upgrades, collection, position, remaining stamina, shared cast timer, and partially caught current trip survive a reload. Pre-stamina saves gain a full stamina pool while retaining their catches, injured fish, and purchases. Older balance exports gain the default stamina setting and keep their custom attack timing. Pre-canvas saves convert each previously unlocked advanced species to one level (5%) of its new skill and retain their wallet, purchases, and current stamina. Legacy balance files convert prices and fish rewards to the new 10× currency scale once. Saves from the original horizontal map migrate to the vertical layout, preserving progress and placing the character safely at the pond or base. There is no offline income. Simulation pauses in background tabs and menus.
+Progress saves after stamina is spent, catches, and purchases, on zone changes, every five seconds, and when the page is hidden. Your wallet, owned and equipped rods, upgrades, collection, position, remaining stamina, shared cast timer, arrival timer, and partially caught fish survive a reload. Version-five saves migrate the previous single rod purchase to the gilded reed while preserving progress; old balance exports gain the ten-second arrival interval and the new rod catalog. Pre-stamina saves gain a full stamina pool while retaining their catches, injured fish, and purchases. Older balance exports gain the default stamina setting and keep their custom attack timing. Pre-canvas saves convert each previously unlocked advanced species to one level (5%) of its new skill and retain their wallet, purchases, and current stamina. Legacy balance files convert prices and fish rewards to the new 10× currency scale once. Saves from the original horizontal map migrate to the vertical layout, preserving progress and placing the character safely at the pond or base. There is no offline income. Simulation pauses in background tabs and menus.
 
 Storage keys:
 
@@ -70,9 +70,9 @@ Malformed saves recover to a fresh game. Invalid balance imports are rejected. I
 
 ## Assets
 
-The original CraftPix ZIPs and extracted editable sources stay local and are ignored by Git. The 43 selected runtime PNGs and license references are in `public/assets`, so a fresh checkout does not need the source packs to run. The art is included for use within this game, not as a standalone asset pack.
+The original CraftPix ZIPs and extracted editable sources stay local and are ignored by Git. The 57 selected runtime PNGs and license references are in `public/assets`, so a fresh checkout does not need the source packs to run. The art is included for use within this game, not as a standalone asset pack.
 
-To repeat asset preparation, place your original six source ZIPs in `assets/craft-pix`, then run from PowerShell:
+To repeat asset preparation, place your seven source ZIPs (including pack **912940**) in `assets/craft-pix`, then run from PowerShell:
 
 ```powershell
 ./scripts/extract-assets.ps1
@@ -95,7 +95,7 @@ The extraction script rejects paths outside each pack's destination and skips ma
 | `src/style.css`       | Interface and responsive layout                                   |
 | `tests/model.test.ts` | Meaningful game-rule regression tests                             |
 
-This is a first playable slice: one lake, one camp, eight skills, four fish species, and one purchasable rod. Multiplayer, additional biomes, quests, and prestige are outside this slice.
+This is a first playable slice: one lake, one camp, eight skills, four fish species, and nine purchasable rods plus a starter rod. Multiplayer, additional biomes, quests, and prestige are outside this slice.
 
 ## Design references
 

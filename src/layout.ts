@@ -3,6 +3,7 @@ export type Point = { x: number; y: number };
 export const VIEW_W = 1280;
 export const VIEW_H = 720;
 export const WORLD_H = 1440;
+export const TOUCH_AIM_OFFSET = 56;
 export const CAMP_CAMERA_Y = WORLD_H - VIEW_H;
 export const DOCK = { left: 594, right: 686, top: 474, bottom: 750 };
 export const LAKE_START: Point = { x: 640, y: 500 };
@@ -17,6 +18,31 @@ export const BUILDING_PLOTS = [
   { x: 640, y: 1230 },
   { x: 945, y: 1230 },
 ] as const;
+
+/** Correct vertical canvas units when the fixed view is stretched to the screen. */
+export function canvasYCorrection(width: number, height: number): number {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  )
+    return 1;
+  return (width * VIEW_H) / (height * VIEW_W);
+}
+
+/** Convert a browser pointer to view coordinates, with an optional screen-space lift. */
+export function screenToViewPoint(
+  clientX: number,
+  clientY: number,
+  bounds: { left: number; top: number; width: number; height: number },
+  yOffset = 0,
+): Point {
+  return {
+    x: ((clientX - bounds.left) / bounds.width) * VIEW_W,
+    y: ((clientY - bounds.top - yOffset) / bounds.height) * VIEW_H,
+  };
+}
 
 /** Use the same framing on load as when walking between the pond and base. */
 export function cameraYFor(point: Point): number {

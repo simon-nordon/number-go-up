@@ -29,6 +29,12 @@ export interface Species {
   sprite: number;
   color: string;
 }
+export interface Rod {
+  name: string;
+  sprite: number;
+  cost: number;
+  multiplier: number;
+}
 export interface Balance {
   base: {
     population: number;
@@ -36,13 +42,21 @@ export interface Balance {
     damage: number;
     tickMs: number;
     radius: number;
+    spawnMs: number;
   };
   skills: Record<SkillId, SkillBalance>;
   species: Species[];
-  rod: { cost: number; multiplier: number };
+  rods: Rod[];
 }
 export const DEFAULT_BALANCE: Balance = {
-  base: { population: 3, stamina: 10, damage: 1, tickMs: 2000, radius: 34 },
+  base: {
+    population: 3,
+    stamina: 10,
+    damage: 1,
+    tickMs: 2000,
+    radius: 34,
+    spawnMs: 10000,
+  },
   skills: {
     population: { cost: 10, growth: 1.28, flatLevels: 3, amount: 1, max: 40 },
     damage: { cost: 40, growth: 1.5, flatLevels: 0, amount: 1, max: 30 },
@@ -55,35 +69,46 @@ export const DEFAULT_BALANCE: Balance = {
   },
   species: [
     {
-      name: "Silver minnow",
+      name: "Silver herring",
       hp: 4,
       value: 10,
-      sprite: 1,
+      sprite: 35,
       color: "#accdd1",
     },
     {
-      name: "Sunset perch",
+      name: "River perch",
       hp: 8,
       value: 30,
-      sprite: 2,
+      sprite: 31,
       color: "#e9bd73",
     },
     {
-      name: "Rosefin koi",
+      name: "Mirror carp",
       hp: 16,
       value: 90,
-      sprite: 4,
+      sprite: 34,
       color: "#e8a294",
     },
     {
-      name: "Golden trout",
+      name: "Rainbow trout",
       hp: 30,
       value: 200,
-      sprite: 3,
+      sprite: 45,
       color: "#ddcc79",
     },
   ],
-  rod: { cost: 10000, multiplier: 5 },
+  rods: [
+    { name: "Willow twig", sprite: 1, cost: 0, multiplier: 1 },
+    { name: "Riverbend", sprite: 2, cost: 1000, multiplier: 1.5 },
+    { name: "Copper cast", sprite: 3, cost: 2500, multiplier: 2 },
+    { name: "Emberline", sprite: 4, cost: 5000, multiplier: 3 },
+    { name: "The gilded reed", sprite: 5, cost: 10000, multiplier: 5 },
+    { name: "Sunweaver", sprite: 6, cost: 25000, multiplier: 8 },
+    { name: "Crescent hook", sprite: 7, cost: 50000, multiplier: 12 },
+    { name: "Dragon branch", sprite: 8, cost: 100000, multiplier: 18 },
+    { name: "Phoenix coil", sprite: 9, cost: 250000, multiplier: 26 },
+    { name: "Tidecaller", sprite: 10, cost: 500000, multiplier: 40 },
+  ],
 };
 export const SKILLS: Record<
   SkillId,
@@ -99,7 +124,7 @@ export const SKILLS: Record<
     name: "Pond life",
     subtitle: "A livelier little lake",
     description:
-      "Invite more fish into each school. A wider school rewards a well-placed cast.",
+      "Make room for more fish in the pond. New fish arrive one at a time until it is full.",
     icon: "fish",
     unit: "fish per level",
   },
@@ -135,7 +160,7 @@ export const SKILLS: Record<
     unit: "stamina per level",
   },
   perch: {
-    name: "Sunset perch",
+    name: "River perch",
     subtitle: "",
     description:
       "Increase perch spawn chance by 5 percentage points per level.",
@@ -143,14 +168,14 @@ export const SKILLS: Record<
     unit: "% spawn chance per level",
   },
   koi: {
-    name: "Rosefin koi",
+    name: "Mirror carp",
     subtitle: "",
-    description: "Increase koi spawn chance by 5 percentage points per level.",
+    description: "Increase carp spawn chance by 5 percentage points per level.",
     icon: "fish",
     unit: "% spawn chance per level",
   },
   trout: {
-    name: "Golden trout",
+    name: "Rainbow trout",
     subtitle: "",
     description:
       "Increase trout spawn chance by 5 percentage points per level.",
@@ -189,15 +214,15 @@ export function validateBalance(input: unknown): Balance {
     !object(input) ||
     !object(input.base) ||
     !object(input.skills) ||
-    !object(input.rod) ||
+    (!object(input.rod) && !Array.isArray(input.rods)) ||
     !Array.isArray(input.species) ||
     input.species.length !== 4
   )
     throw new Error(
-      "Use a Stillwater balance file with base, skills, four species, and rod settings.",
+      "Use a Stillwater balance file with base, skills, four species, and rods.",
     );
   const base = {
-    population: number(input.base.population, 1, 100, "Starting fish", true),
+    population: number(input.base.population, 1, 100, "Pond capacity", true),
     // Older balance exports predate stamina; keep their other custom settings.
     stamina: number(
       "stamina" in input.base
@@ -211,6 +236,14 @@ export function validateBalance(input: unknown): Balance {
     damage: number(input.base.damage, 0.1, 10000, "Base damage"),
     tickMs: number(input.base.tickMs, 80, 10000, "Tick interval"),
     radius: number(input.base.radius, 10, 200, "Cursor radius"),
+    spawnMs: number(
+      "spawnMs" in input.base
+        ? input.base.spawnMs
+        : DEFAULT_BALANCE.base.spawnMs,
+      100,
+      3600000,
+      "Fish arrival interval",
+    ),
   };
   const skills = {} as Balance["skills"];
   const legacy = object(input.skills.species) && !("perch" in input.skills);
@@ -272,15 +305,36 @@ export function validateBalance(input: unknown): Balance {
         (legacy ? 10 : 1),
     };
   });
-  return {
-    base,
-    skills,
-    species,
-    rod: {
-      cost:
-        number(input.rod.cost, 1, legacy ? 10000000 : 100000000, "Rod price") *
-        (legacy ? 10 : 1),
-      multiplier: number(input.rod.multiplier, 1, 1000, "Rod multiplier"),
-    },
-  };
+  const rods = structuredClone(DEFAULT_BALANCE.rods);
+  if (Array.isArray(input.rods)) {
+    if (input.rods.length !== rods.length)
+      throw new Error("Expected ten rods.");
+    input.rods.forEach((rod, i) => {
+      if (!object(rod)) throw new Error(`Missing rod ${i + 1}.`);
+      rods[i].cost = number(
+        rod.cost,
+        i === 0 ? 0 : 1,
+        i === 0 ? 0 : 100000000,
+        "Rod price",
+      );
+      rods[i].multiplier = number(
+        rod.multiplier,
+        1,
+        i === 0 ? 1 : 1000,
+        "Rod multiplier",
+      );
+    });
+  } else if (object(input.rod)) {
+    // Preserve the former $10,000 masterwork and any custom tuning.
+    rods[4].cost =
+      number(input.rod.cost, 1, legacy ? 10000000 : 100000000, "Rod price") *
+      (legacy ? 10 : 1);
+    rods[4].multiplier = number(
+      input.rod.multiplier,
+      1,
+      1000,
+      "Rod multiplier",
+    );
+  }
+  return { base, skills, species, rods };
 }

@@ -15,6 +15,11 @@ const assets = {
   "boy.png": "village/PNG/Characters/Boy_looking.png",
   "merchant.png": "village/PNG/Characters/Old_man_idle_without_shadow.png",
 };
+for (const id of [31, 34, 35, 45])
+  assets[`pond-fish-${id}.png`] = `medieval-fishing/Icons/Icon_38_${id}.png`;
+for (let id = 1; id <= 10; id++)
+  assets[`rod-${id}.png`] =
+    `medieval-fishing/Icons/Icon_38_${String(id).padStart(2, "0")}.png`;
 for (let i = 1; i <= 10; i++)
   assets[`fish-${i}.png`] = `fishing/PNG_n_Tiled/Fish${i}.png`;
 for (const state of ["Walk", "Idle"])

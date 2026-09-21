@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../assets/craft-pix'))
-$packs = @{ '180537'='characters'; '189510'='grassland'; '219768'='fishing-icons'; '255216'='ui'; '596440'='fishing'; '885927'='village' }
+$packs = @{ '180537'='characters'; '189510'='grassland'; '219768'='fishing-icons'; '255216'='ui'; '596440'='fishing'; '885927'='village'; '912940'='medieval-fishing' }
 foreach ($archive in Get-ChildItem -LiteralPath $source -Filter *.zip) {
   $id = [regex]::Match($archive.Name, '\d{6}').Value
   if (-not $packs.ContainsKey($id)) { continue }
