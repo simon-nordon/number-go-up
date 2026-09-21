@@ -344,7 +344,7 @@ function openJournal(): void {
 function openSettings(): void {
   openDialog(
     "settings",
-    `${dialogHeader("", "Settings")}<div class="settings-content"><label class="setting-row"><span><strong>Sound effects</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>How to play</h3><p>Use the <b>direction pad</b>, <b>WASD</b>, or <b>arrow keys</b> to move. Tap a path or destination sign to walk there.</p><p>At the end of the dock, <b>hold a fish</b> to catch it, or hover with a mouse. Catches earn coins automatically. Each damage tick uses <b>1 stamina</b>, even when it hits several fish.</p><p>Walk down to base and tap <b>Skills</b> or <b>Rod shop</b> to upgrade. Clearing the pond brings a new school without restoring stamina. At <b>0 stamina</b>, the trip ends. Visit base and return to start a new trip with full stamina. Your progress saves in this browser.</p></div><div class="credits">CraftPix pixel art · Stillwater<br>Mobile: portrait recommended. Desktop: press E to interact.</div></div>`,
+    `${dialogHeader("", "Settings")}<div class="settings-content"><label class="setting-row"><span><strong>Sound effects</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>How to play</h3><p>Use the <b>direction pad</b>, <b>WASD</b>, or <b>arrow keys</b> to move. Tap a path or destination sign to walk there.</p><p>At the end of the dock, <b>hold a fish</b> to catch it, or hover with a mouse. Catches earn coins automatically. Each damage tick uses <b>1 stamina</b>, even when it hits several fish.</p><p>Walk down to base and tap <b>Skills</b> or <b>Rod shop</b> to upgrade. Clearing the pond brings a new school without restoring stamina. At <b>0 stamina</b>, the trip ends. Visit base and return to start a new trip with full stamina. Your progress saves in this browser.</p></div><button class="secondary-button danger-text settings-reset" data-action="reset-progress">Reset all progress</button><div class="credits">CraftPix pixel art · Stillwater<br>Mobile: portrait recommended. Desktop: press E to interact.</div></div>`,
   );
   $("#sound-setting").addEventListener("change", (e) => {
     audio.enabled = (e.target as HTMLInputElement).checked;
@@ -450,10 +450,10 @@ function applyEditor(): boolean {
     return false;
   }
 }
-function confirmReset(): void {
+function confirmReset(returnAction: "settings" | "editor"): void {
   openDialog(
     "reset",
-    `${dialogHeader("A FRESH LITTLE START", "Cast from the beginning?", "This resets your wallet, catches, upgrades, and current trip.")}<div class="reset-content"><p>Your custom balance settings will stay. This replaces the saved progress in this browser.</p><div class="reset-actions"><button class="secondary-button" data-action="editor">Keep fishing</button><button class="primary-button" data-action="confirm-reset">Start a new save</button></div></div>`,
+    `${dialogHeader("", "Reset progress?", "Wallet, catches, upgrades, and current trip.")}<div class="reset-content"><p>Balance settings stay.</p><div class="reset-actions"><button class="secondary-button" data-action="${returnAction}">Cancel</button><button class="primary-button" data-action="confirm-reset">Reset progress</button></div></div>`,
   );
 }
 
@@ -535,18 +535,21 @@ document.addEventListener("click", (e) => {
       }
       break;
     case "reset-save":
-      if (devMode) confirmReset();
+      if (devMode) confirmReset("editor");
+      break;
+    case "reset-progress":
+      confirmReset("settings");
       break;
     case "confirm-reset":
-      if (devMode) {
-        state = newGame(balance);
-        world.replaceState(state);
-        lastTotal = 0;
-        save();
-        updateUI(true);
-        closeDialog();
-        toast("A fresh start. The lake is all yours.");
-      }
+      state = newGame(balance);
+      world.replaceState(state);
+      lastZone = state.inCamp;
+      lastTotal = 0;
+      lastStamina = state.stamina;
+      save();
+      updateUI(true);
+      closeDialog();
+      toast("Progress reset.");
       break;
     case "default-balance":
       if (devMode) {
