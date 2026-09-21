@@ -418,16 +418,18 @@ button span {
 .travel-sign {
   position: absolute;
   bottom: 27px;
-  left: 32px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 8px;
   color: #f5f0d1;
-  background: transparent;
-  border: 0;
+  background: #354f3de8;
+  border: 1px solid #c6d3ac70;
+  border-radius: 5px;
   font-size: 11px;
   text-shadow: 0 1px 2px #3d5d3d;
-  padding: 0;
+  padding: 9px 14px;
 }
 .travel-sign kbd {
   margin-left: 5px;
@@ -441,7 +443,7 @@ button span {
 }
 .world-sign {
   position: absolute;
-  transform: translateX(-50%);
+  transform: translate(-50%, -100%);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -457,7 +459,7 @@ button span {
   z-index: 2;
 }
 .world-sign:active:not(:disabled) {
-  transform: translate(-50%, 1px);
+  transform: translate(-50%, -100%) translateY(1px);
 }
 .world-sign:hover {
   background: #fff9e1;
@@ -483,6 +485,50 @@ button span {
   color: #929c6f;
   margin-left: 5px;
 }
+.building-plot-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  color: #eef0d0;
+  text-align: center;
+  text-shadow: 0 1px 2px #45583380;
+  pointer-events: none;
+  white-space: nowrap;
+  font:
+    14px Georgia,
+    serif;
+}
+.plot-mystery {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e6e2b960;
+  border-radius: 50%;
+  background: #647e4540;
+  font-size: 21px;
+  color: #e4dfb5;
+}
+.building-plot-label small {
+  font:
+    600 7px "Trebuchet MS",
+    sans-serif;
+  letter-spacing: 1.2px;
+  color: #d1d8b0;
+}
+.in-camp .world-tip {
+  top: auto;
+  right: 27px;
+  bottom: 22px;
+  left: auto;
+}
+.in-camp .travel-sign {
+  top: 26px;
+  bottom: auto;
+}
 .interaction-hint {
   position: absolute;
   transform: translateX(-50%);
@@ -501,8 +547,8 @@ button span {
 }
 .pond-empty {
   position: absolute;
-  top: 33%;
-  left: 66%;
+  top: 22%;
+  left: 50%;
   transform: translateX(-50%);
   text-align: center;
   color: #eef0d5;
@@ -2041,6 +2087,7 @@ kbd {
   }
   .travel-sign {
     left: 16px;
+    transform: none;
     bottom: 24px;
     font-size: 10px;
   }
@@ -2048,15 +2095,44 @@ kbd {
     display: flex;
     padding: 6px 8px;
     gap: 5px;
+    transform: translate(-50%, 3px);
+  }
+  .world-sign:active:not(:disabled) {
+    transform: translate(-50%, 4px);
   }
   .world-sign > span {
     font-size: 8px;
   }
   .world-sign small {
     font-size: 6px;
+    margin-top: 3px;
   }
   .world-sign .sign-arrow {
     font-size: 12px;
+  }
+  .building-plot-label {
+    font-size: 9px;
+    gap: 5px;
+  }
+  .building-plot-label small {
+    font-size: 5px;
+    letter-spacing: 0.5px;
+  }
+  .plot-mystery {
+    width: 23px;
+    height: 23px;
+    font-size: 16px;
+  }
+  .in-camp .world-tip {
+    display: none;
+  }
+  .in-camp .travel-sign {
+    top: 24px;
+    right: 12px;
+    left: auto;
+    transform: none;
+    padding: 8px 10px;
+    font-size: 9px;
   }
   .equipment-bar {
     height: 84px;
@@ -2134,9 +2210,9 @@ kbd {
     margin-left: 2px;
   }
   .pond-empty {
-    left: 62%;
+    left: 50%;
     min-width: 220px;
-    top: 32%;
+    top: 24%;
   }
   .pond-empty h2 {
     font-size: 23px;
@@ -2464,6 +2540,11 @@ kbd {
   }
   .reset-actions button {
     font-size: 10px;
+  }
+}
+@media (max-height: 850px) {
+  .in-camp .world-tip {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { freshBalance, validateBalance } from "../src/config.ts";
+import { CAMP_START, LAKE_START, STATIONS } from "../src/layout.ts";
 import {
   enterCamp,
   enterLake,
@@ -64,7 +65,7 @@ test("damage is time-based, pauses off a fish, and requires standing at the dock
   tickFishing(state, balance, 30, pointer);
   assert.equal(fish.hp, 3);
   state.inCamp = false;
-  state.player.x = 800;
+  state.player.y = 650;
   tickFishing(state, balance, 30, pointer);
   assert.equal(fish.hp, 3);
 });
@@ -73,15 +74,15 @@ test("a wide cursor damages multiple fish and each catch pays exactly once", () 
   const balance = freshBalance(),
     state = newGame(balance, () => 0.5);
   state.fish.forEach((f) => {
-    f.x = 1400;
+    f.x = 700;
     f.y = 300;
     f.phase = 0;
   });
-  const events = tickFishing(state, balance, 100, { x: 1400, y: 300 });
+  const events = tickFishing(state, balance, 100, { x: 700, y: 300 });
   assert.equal(events.filter((e) => e.type === "catch").length, 3);
   assert.equal(state.money, 3);
   assert.deepEqual(state.collection, [3, 0, 0, 0]);
-  tickFishing(state, balance, 100, { x: 1400, y: 300 });
+  tickFishing(state, balance, 100, { x: 700, y: 300 });
   assert.equal(state.money, 3);
 });
 
@@ -185,7 +186,7 @@ test("saves round-trip partial trips, money, levels and camp position", () => {
   tickFishing(state, balance, 2.6, fishPosition(state.fish[0], 0));
   state.fish[0].hp = 3;
   enterCamp(state);
-  state.player = { x: 567, y: 385 };
+  state.player = { x: STATIONS.tree.targetX, y: STATIONS.tree.targetY };
   assert.equal(purchaseSkill(state, "population", balance), true);
   const restored = parseSave(JSON.stringify(state), balance)!;
   assert.ok(restored);
@@ -240,7 +241,7 @@ test("extreme valid tuning remains within gameplay safety caps", () => {
   assert.equal(stats.population, 150);
 });
 
-test("random fish never spawn underneath the trip information card", () => {
+test("random fish stay in the northern pond and clear of both interface cards", () => {
   const balance = freshBalance();
   balance.base.population = 100;
   let seed = 35;
@@ -250,6 +251,60 @@ test("random fish never spawn underneath the trip information card", () => {
   };
   const state = newGame(balance, random);
   for (const fish of state.fish) {
-    assert.ok(fish.x <= 1390 || fish.y >= 320);
+    assert.ok(fish.x >= 200 && fish.x <= 1080);
+    assert.ok(fish.y >= 195 && fish.y <= 410);
+    assert.ok(fish.x <= 770 || fish.y >= 320);
+    assert.ok(fish.x >= 480 || fish.y >= 280);
   }
+});
+
+test("legacy horizontal saves migrate without losing purchases or the partial trip", () => {
+  const balance = freshBalance();
+  for (const inCamp of [false, true]) {
+    const original = newGame(balance, () => 0.5);
+    original.money = 123;
+    original.levels.population = 3;
+    original.rod = true;
+    original.fish[0].hp = 2;
+    const legacy = {
+      ...original,
+      version: 1,
+      inCamp,
+      restockReady: inCamp,
+      player: inCamp ? { x: 567, y: 385 } : { x: 1030, y: 409 },
+      fish: original.fish.map((fish, i) => ({
+        ...fish,
+        x: 1270 + i * 220,
+        y: 275 + i * 80,
+      })),
+    };
+    const migrated = parseSave(JSON.stringify(legacy), balance)!;
+    assert.ok(migrated);
+    assert.equal(migrated.version, 2);
+    assert.deepEqual(migrated.player, inCamp ? CAMP_START : LAKE_START);
+    assert.equal(migrated.money, original.money);
+    assert.deepEqual(migrated.levels, original.levels);
+    assert.equal(migrated.rod, true);
+    assert.equal(migrated.fish.length, original.fish.length);
+    assert.equal(migrated.fish[0].hp, 2);
+    assert.equal(migrated.trip, original.trip);
+    assert.equal(migrated.restockReady, inCamp);
+    assert.deepEqual(parseSave(JSON.stringify(migrated), balance), migrated);
+  }
+});
+
+test("vertical saves reject the water and buildings but preserve travel along the dock", () => {
+  const balance = freshBalance();
+  const state = newGame(balance);
+  for (const player of [
+    { x: 500, y: 500 },
+    { x: 945, y: 950 },
+    { x: 335, y: 970 },
+  ])
+    assert.equal(
+      parseSave(JSON.stringify({ ...state, player }), balance),
+      null,
+    );
+  state.player = { x: 640, y: 650 };
+  assert.deepEqual(parseSave(JSON.stringify(state), balance), state);
 });

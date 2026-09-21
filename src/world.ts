@@ -1,6 +1,24 @@
 import type { Assets } from "./assets.ts";
 import type { Balance } from "./config.ts";
 import {
+  atFishingSpot,
+  BUILDING_PLOTS,
+  cameraYFor,
+  CAMP_ENTRY_Y,
+  CAMP_START,
+  DOCK,
+  inPond,
+  isWalkable,
+  LAKE_START,
+  shoreY,
+  STATIONS,
+  VIEW_H,
+  VIEW_W,
+  walkingRoute,
+  WORLD_H,
+  type Point,
+} from "./layout.ts";
+import {
   enterCamp,
   enterLake,
   fishPosition,
@@ -10,12 +28,6 @@ import {
   type GameState,
 } from "./model.ts";
 
-export const VIEW_W = 1280;
-export const VIEW_H = 720;
-export const STATIONS = {
-  tree: { x: 567, y: 300, targetX: 567, targetY: 385 },
-  shop: { x: 280, y: 324, targetX: 285, targetY: 402 },
-};
 type Station = keyof typeof STATIONS;
 type Decoration = {
   image: string;
@@ -23,6 +35,7 @@ type Decoration = {
   y: number;
   scale: number;
   crop?: number[];
+  maxHeight?: number;
 };
 type Particle = {
   x: number;
@@ -34,11 +47,10 @@ type Particle = {
   color: string;
   text?: string;
 };
-type Point = { x: number; y: number };
 
 export class World {
   readonly canvas: HTMLCanvasElement;
-  camera = 640;
+  cameraY = 0;
   pointer: Point | null = null;
   keys = new Set<string>();
   paused = false;
@@ -54,7 +66,7 @@ export class World {
   private sprites: Record<string, HTMLCanvasElement> = {};
   private decorations: Decoration[] = [];
   private particles: Particle[] = [];
-  private direction = 2;
+  private direction = 3;
   private route: Point[] = [];
   private destination: Station | null = null;
   private lastTime = 0;
@@ -85,9 +97,10 @@ export class World {
     this.context = canvas.getContext("2d")!;
     this.context.imageSmoothingEnabled = false;
     this.terrain = document.createElement("canvas");
-    this.terrain.width = 1920;
-    this.terrain.height = VIEW_H;
-    this.camera = state.inCamp ? 0 : 640;
+    this.terrain.width = VIEW_W;
+    this.terrain.height = WORLD_H;
+    this.cameraY = cameraYFor(state.player);
+    this.direction = state.inCamp ? 0 : 3;
     for (const [key, image] of Object.entries(assets))
       if (/^(Tree|Bush|Flower)/.test(key)) this.sprites[key] = this.trim(image);
     this.buildTerrain();
@@ -100,21 +113,20 @@ export class World {
       this.updatePointer(e);
       if (this.paused || !this.pointer) return;
       const point = this.worldPointer()!;
-      const station =
-        Math.abs(point.x - STATIONS.tree.x) < 88 &&
-        point.y > 115 &&
-        point.y < 328
-          ? "tree"
-          : point.x > 175 && point.x < 390 && point.y > 140 && point.y < 377
-            ? "shop"
-            : null;
+      const station = (Object.keys(STATIONS) as Station[]).find((id) => {
+        const s = STATIONS[id];
+        return (
+          Math.abs(point.x - s.x) < (id === "shop" ? 114 : 90) &&
+          point.y > s.y - 190 * this.spriteYScale &&
+          point.y < s.y + 15
+        );
+      });
       if (station) {
         if (this.nearestStation() === station) this.onStation(station);
         else this.goTo(station);
         return;
       }
-      if (point.x < 1120 && this.walkable(point.x, point.y))
-        this.travelTo(point);
+      if (isWalkable(point.x, point.y)) this.travelTo(point);
     });
     window.addEventListener("keydown", (e) => {
       if (
@@ -168,7 +180,8 @@ export class World {
   replaceState(state: GameState): void {
     this.state = state;
     this.stopWalking();
-    this.camera = state.inCamp ? 0 : 640;
+    this.cameraY = cameraYFor(state.player);
+    this.direction = state.inCamp ? 0 : 3;
     this.particles = [];
   }
   get targetFish(): number | null {
@@ -183,7 +196,7 @@ export class World {
   }
   worldPointer(): Point | null {
     return this.pointer
-      ? { x: this.pointer.x + this.camera, y: this.pointer.y }
+      ? { x: this.pointer.x, y: this.pointer.y + this.cameraY }
       : null;
   }
   private trim(image: HTMLImageElement): HTMLCanvasElement {
@@ -230,135 +243,150 @@ export class World {
       return n / 4294967296;
     };
   }
-  private shore(y: number): number {
-    return (
-      784 +
-      Math.floor((Math.sin(y * 0.012) * 22 + Math.cos(y * 0.027) * 12) / 16) *
-        16
-    );
-  }
   private buildTerrain(): void {
     const c = this.terrain.getContext("2d")!;
     c.imageSmoothingEnabled = false;
     const rand = this.seeded(329);
     c.fillStyle = "#4f9499";
-    c.fillRect(0, 0, 1920, 720);
-    // Low-contrast patches keep the lake readable without a flat backdrop.
-    for (let i = 0; i < 250; i++) {
+    c.fillRect(0, 0, VIEW_W, WORLD_H);
+    for (let i = 0; i < 230; i++) {
       c.fillStyle = ["#51989c", "#4c9197", "#559b9e", "#509699"][i % 4];
       c.fillRect(
-        Math.floor((rand() * 1920) / 16) * 16,
-        Math.floor((rand() * 720) / 8) * 8,
-        48 + Math.floor(rand() * 11) * 16,
-        16 + Math.floor(rand() * 7) * 8,
+        Math.floor((rand() * VIEW_W) / 16) * 16,
+        Math.floor((rand() * 700) / 8) * 8,
+        48 + Math.floor(rand() * 8) * 16,
+        16 + Math.floor(rand() * 5) * 8,
       );
     }
-    for (let y = 0; y < 720; y += 16) {
-      const edge = this.shore(y);
-      c.fillStyle = "#69aaab";
-      c.fillRect(0, y, edge + 32, 16);
-      c.fillStyle = "#8bc1b5";
-      c.fillRect(0, y, edge + 16, 16);
-      c.fillStyle = "#c0c18d";
-      c.fillRect(0, y, edge + 6, 16);
-      c.fillStyle = "#657c49";
-      c.fillRect(0, y, edge, 16);
-      c.fillStyle = "#8dab61";
-      c.fillRect(0, y, edge - 7, 16);
+    // The southern shore leads straight down from the pond into the base.
+    for (let x = 0; x < VIEW_W; x += 16) {
+      const edge = shoreY(x);
+      for (const [offset, color] of [
+        [-32, "#69aaab"],
+        [-18, "#8bc1b5"],
+        [-7, "#c0c18d"],
+        [0, "#657c49"],
+        [7, "#8dab61"],
+      ] as const) {
+        c.fillStyle = color;
+        c.fillRect(x, edge + offset, 16, WORLD_H - edge - offset);
+      }
     }
-    // Actual grassland ground tiles, mixed with small vegetation decals.
     c.save();
     c.beginPath();
-    c.moveTo(0, 0);
-    for (let y = 0; y <= 720; y += 16) c.lineTo(this.shore(y) - 12, y);
-    c.lineTo(0, 720);
+    c.moveTo(0, WORLD_H);
+    for (let x = 0; x <= VIEW_W; x += 16) {
+      c.lineTo(x, shoreY(x) + 12);
+      c.lineTo(x + 16, shoreY(x) + 12);
+    }
+    c.lineTo(VIEW_W, WORLD_H);
     c.closePath();
     c.clip();
-    for (let y = 0; y < 720; y += 32)
-      for (let x = 0; x < 820; x += 32)
+    for (let y = 640; y < WORLD_H; y += 32)
+      for (let x = 0; x < VIEW_W; x += 32)
         c.drawImage(this.assets.ground, 144, 208, 16, 16, x, y, 32, 32);
-    for (let i = 0; i < 1400; i++) {
-      const x = Math.floor((rand() * 830) / 2) * 2,
-        y = Math.floor((rand() * 720) / 2) * 2;
+    for (let i = 0; i < 2200; i++) {
       c.fillStyle = ["#94ae62", "#7f9c52", "#a0b66b", "#87a459"][i % 4];
-      c.fillRect(x, y, 2 + Math.floor(rand() * 4) * 2, 2);
+      c.fillRect(
+        Math.floor((rand() * VIEW_W) / 2) * 2,
+        640 + Math.floor((rand() * 800) / 2) * 2,
+        2 + Math.floor(rand() * 4) * 2,
+        2,
+      );
     }
-    // A worn path joins the cottage, the tree, and the dock.
+    // One central path, two working stations, and three spaces to grow into.
     c.lineCap = "round";
     c.lineJoin = "round";
-    const path = () => {
+    for (const [width, color] of [
+      [90, "#94a362"],
+      [66, "#b9b07f"],
+      [48, "#c8bc91"],
+    ] as const) {
+      c.lineWidth = width;
+      c.strokeStyle = color;
       c.beginPath();
-      c.moveTo(165, 413);
-      c.lineTo(352, 413);
-      c.lineTo(460, 431);
-      c.lineTo(608, 414);
-      c.lineTo(810, 414);
+      c.moveTo(640, 668);
+      c.lineTo(640, 1140);
+      c.moveTo(280, 1060);
+      c.lineTo(1000, 1060);
+      c.moveTo(335, 1060);
+      c.lineTo(335, 1140);
+      c.moveTo(945, 1060);
+      c.lineTo(945, 1140);
       c.stroke();
-    };
-    c.strokeStyle = "#94a362";
-    c.lineWidth = 88;
-    path();
-    c.strokeStyle = "#b9b07f";
-    c.lineWidth = 65;
-    path();
-    c.strokeStyle = "#c8bc91";
-    c.lineWidth = 49;
-    path();
-    for (let i = 0; i < 100; i++) {
+    }
+    for (let i = 0; i < 110; i++) {
       c.fillStyle = i % 2 ? "#b5a980" : "#d5c797";
-      c.fillRect(180 + rand() * 610, 397 + rand() * 32, 3, 2);
+      c.fillRect(623 + rand() * 32, 730 + rand() * 378, 4, 2);
+      c.fillRect(280 + rand() * 720, 1043 + rand() * 32, 4, 2);
+    }
+    for (const plot of BUILDING_PLOTS) {
+      const left = plot.x - 104,
+        top = plot.y - 64;
+      c.fillStyle = "#6e875538";
+      c.fillRect(left + 8, top + 8, 192, 112);
+      c.fillStyle = "#abb47848";
+      c.fillRect(left + 12, top + 12, 184, 104);
+      c.strokeStyle = "#e4dbab90";
+      c.lineWidth = 2;
+      c.setLineDash([7, 9]);
+      c.strokeRect(left + 2, top + 2, 204, 120);
+      c.setLineDash([]);
+      for (const dx of [0, 204])
+        for (const dy of [0, 120]) {
+          c.fillStyle = "#526c3e50";
+          c.fillRect(left + dx, top + dy + 5, 12, 4);
+          c.fillStyle = "#88704c";
+          c.fillRect(left + dx - 2, top + dy - 9, 5, 16);
+          c.fillStyle = "#decc99";
+          c.fillRect(left + dx - 2, top + dy - 10, 5, 4);
+        }
     }
     c.restore();
-    // Dock planks and supports from the fishing village tileset.
+    // Horizontal planks run across a north-facing pier; sprites stay upright.
     c.fillStyle = "#255e6650";
-    c.fillRect(754, 470, 344, 21);
-    c.drawImage(this.assets.dock, 0, 0, 112, 56, 752, 345, 336, 144);
-    for (const x of [773, 914, 1061])
-      for (const y of [337, 458])
+    c.fillRect(578, 469, 144, 286);
+    c.fillStyle = "#655044";
+    c.fillRect(574, 458, 132, 286);
+    for (let y = 462; y < 742; y += 40)
+      c.drawImage(this.assets.dock, 0, 8, 112, 40, 578, y, 124, 40);
+    for (const x of [564, 702])
+      for (const y of [452, 572, 696])
         c.drawImage(this.assets.dock, 56, 144, 9, 19, x, y, 18, 38);
-    // A small, wooded far bank gives the lake a sense of place.
-    c.fillStyle = "#6dafac";
-    c.beginPath();
-    c.moveTo(1536, 0);
-    c.lineTo(1590, 38);
-    c.lineTo(1680, 58);
-    c.lineTo(1738, 48);
-    c.lineTo(1810, 89);
-    c.lineTo(1920, 98);
-    c.lineTo(1920, 0);
-    c.fill();
-    c.fillStyle = "#bfbc85";
-    c.beginPath();
-    c.moveTo(1560, 0);
-    c.lineTo(1602, 25);
-    c.lineTo(1680, 45);
-    c.lineTo(1744, 32);
-    c.lineTo(1815, 74);
-    c.lineTo(1920, 82);
-    c.lineTo(1920, 0);
-    c.fill();
-    c.fillStyle = "#829d55";
-    c.beginPath();
-    c.moveTo(1580, 0);
-    c.lineTo(1630, 22);
-    c.lineTo(1690, 33);
-    c.lineTo(1750, 22);
-    c.lineTo(1820, 60);
-    c.lineTo(1920, 70);
-    c.lineTo(1920, 0);
-    c.fill();
-    // Lily pads, reeds and a few submerged stones.
+    // Glimpses of a wooded far bank frame the open fishing water.
+    for (const side of [0, 1]) {
+      c.save();
+      if (side) {
+        c.translate(VIEW_W, 0);
+        c.scale(-1, 1);
+      }
+      for (const [offset, color] of [
+        [20, "#6dafac"],
+        [8, "#bfbc85"],
+        [0, "#829d55"],
+      ] as const) {
+        c.fillStyle = color;
+        c.beginPath();
+        c.moveTo(0, 0);
+        c.lineTo(310 + offset, 0);
+        c.lineTo(230 + offset, 30 + offset);
+        c.lineTo(130 + offset, 43 + offset);
+        c.lineTo(65 + offset, 70 + offset);
+        c.lineTo(0, 80 + offset);
+        c.fill();
+      }
+      c.restore();
+    }
     for (const [x, y] of [
-      [896, 184],
-      [908, 198],
-      [918, 165],
-      [1800, 611],
-      [1828, 599],
-      [1785, 586],
-      [1692, 106],
-      [1650, 96],
-      [859, 569],
-      [884, 585],
+      [165, 175],
+      [198, 190],
+      [1030, 170],
+      [1070, 188],
+      [1120, 544],
+      [1085, 564],
+      [230, 565],
+      [255, 582],
+      [814, 610],
     ]) {
       c.fillStyle = "#337d72";
       c.fillRect(x - 12, y + 2, 27, 8);
@@ -370,8 +398,8 @@ export class World {
       c.fillStyle = "#4f9499";
       c.fillRect(x, y + 2, 3, 4);
     }
-    for (const y of [102, 130, 263, 551, 586, 637]) {
-      const x = this.shore(y) - 3;
+    for (const x of [84, 180, 354, 480, 805, 900, 1104, 1190]) {
+      const y = shoreY(x) - 12;
       for (let i = 0; i < 6; i++) {
         c.fillStyle = i % 2 ? "#547957" : "#849858";
         c.fillRect(x + i * 5, y - (i % 3) * 7, 3, 24);
@@ -387,78 +415,71 @@ export class World {
       y: number,
       scale = 2,
       crop?: number[],
-    ) => this.decorations.push({ image, x, y, scale, crop });
+      maxHeight?: number,
+    ) => this.decorations.push({ image, x, y, scale, crop, maxHeight });
     const rand = this.seeded(735);
-    for (let x = -20; x < 790; x += 62) {
-      add(`Tree${1 + Math.floor(rand() * 4)}`, x, 135 + rand() * 48, 2.3);
-      if (x < 180 || x > 640)
-        add(`Tree${1 + Math.floor(rand() * 2)}`, x, 228 + rand() * 38, 2.05);
+    for (let y = 792; y < WORLD_H + 180; y += 106) {
+      add(`Tree${1 + Math.floor(rand() * 4)}`, 35 + rand() * 24, y, 2.25);
+      add(
+        `Tree${1 + Math.floor(rand() * 4)}`,
+        1218 + rand() * 34,
+        y + 18,
+        2.25,
+      );
     }
-    for (let y = 300; y < 720; y += 105) add("Tree2", 45 + rand() * 35, y, 2.4);
-    for (let x = 80; x < 790; x += 80) {
-      add(`Tree${1 + Math.floor(rand() * 4)}`, x, 900 + rand() * 60, 2.5);
-      add("Bush3", x + 18, 640 + rand() * 30, 1.7);
+    for (let x = 135; x < VIEW_W - 90; x += 94) {
+      add(`Tree${1 + Math.floor(rand() * 4)}`, x, 1560 + rand() * 30, 2.3);
+      if (x < 500 || x > 770) add("Bush3", x, 759 + rand() * 25, 1.4);
     }
+    // Keep the working stations inside their row even in a short window.
+    add("Tree1", STATIONS.tree.x, STATIONS.tree.y, 2.5, undefined, 244);
+    add(
+      "village",
+      STATIONS.shop.x,
+      STATIONS.shop.y,
+      1.85,
+      [12, 0, 104, 112],
+      244,
+    );
+    add("village", 741, 751, 1.25, [166, 500, 29, 43]);
+    add("village", 604, 709, 1.1, [0, 509, 30, 32]);
     for (const [x, y] of [
-      [695, 208],
-      [114, 524],
+      [205, 1000],
+      [460, 989],
+      [800, 984],
+      [1100, 999],
+      [159, 1290],
+      [1110, 1270],
     ])
-      add("Tree1", x, y, 2.05);
-    add("Tree1", 715, 690, 1.7);
-    add("Tree1", 700, 645, 1.7);
-    add("Tree1", 567, 325, 2.85);
-    add("village", 280, 377, 2.1, [12, 0, 104, 112]);
-    add("village", 421, 329, 1.4, [72, 270, 64, 45]);
-    add("village", 169, 400, 1.5, [0, 274, 64, 68]);
-    add("village", 762, 353, 1.35, [166, 500, 29, 43]);
-    add("village", 811, 475, 1.4, [0, 509, 30, 32]);
-    add("village", 958, 360, 1.1, [205, 305, 29, 33]);
-    for (let i = 0; i < 36; i++) {
-      const x = 100 + rand() * 650,
-        y = 485 + rand() * 136;
-      add(`Flower${1 + (i % 7)}`, x, y, 1.7);
+      add("Bush1", x, y, 1.65);
+    for (let i = 0; i < 45; i++) {
+      const x = 140 + rand() * 990,
+        y = 815 + rand() * 550;
+      if (
+        Math.abs(x - 640) < 90 ||
+        (y > 1010 && y < 1320) ||
+        (x > 815 && y < 1010)
+      )
+        continue;
+      add(`Flower${1 + (i % 7)}`, x, y, 1.5);
     }
-    for (const [x, y] of [
-      [717, 300],
-      [648, 297],
-      [128, 355],
-      [515, 329],
-      [734, 578],
-      [690, 150],
-      [132, 604],
-    ])
-      add("Bush1", x, y, 1.9);
-    for (let x = 1640; x < 1980; x += 68)
-      add(`Tree${1 + Math.floor(rand() * 3)}`, x, 20 + (x - 1640) * 0.15, 1.9);
-  }
-  private walkable(x: number, y: number): boolean {
-    if (x < 87 || x > 1071 || y < 180 || y > 622) return false;
-    if (x > 744 && (y < 382 || y > 440)) return false;
-    if (x > 175 && x < 390 && y < 378) return false;
-    if (Math.hypot(x - 567, y - 299) < 41) return false;
-    if (x > 389 && x < 464 && y > 286 && y < 332) return false;
-    return true;
+    for (let x = -20; x < 280; x += 66) {
+      add(`Tree${1 + Math.floor(rand() * 3)}`, x, 43 - x * 0.12, 1.7);
+      add(`Tree${1 + Math.floor(rand() * 3)}`, VIEW_W - x, 43 - x * 0.12, 1.7);
+    }
   }
   private travelTo(point: Point): void {
     this.destination = null;
-    this.route = [];
-    if (this.state.player.x > 744 || point.x > 744)
-      this.route.push({ x: this.state.player.x, y: 409 }, { x: 722, y: 409 });
-    // Stay on the open path when routing past the hut or the tree.
-    if (point.x < 744)
-      this.route.push(
-        { x: this.state.player.x > 744 ? 722 : this.state.player.x, y: 409 },
-        { x: point.x, y: 409 },
-      );
-    this.route.push(point);
+    this.route = walkingRoute(this.state.player, point);
   }
+
   goTo(place: "camp" | "lake" | Station): void {
     if (place === "lake") {
-      this.travelTo({ x: 1030, y: 409 });
+      this.travelTo(LAKE_START);
       this.onTravel("Taking the path to the dock…");
     } else if (place === "camp") {
-      this.travelTo({ x: 635, y: 409 });
-      this.onTravel("Heading back to camp…");
+      this.travelTo(CAMP_START);
+      this.onTravel("Heading down to your base…");
     } else {
       const station = STATIONS[place];
       this.travelTo({ x: station.targetX, y: station.targetY });
@@ -521,11 +542,11 @@ export class World {
       dx /= length;
       dy /= length;
       let moved = false;
-      if (this.walkable(p.x + dx * distance, p.y)) {
+      if (isWalkable(p.x + dx * distance, p.y)) {
         p.x += dx * distance;
         moved = true;
       }
-      if (this.walkable(p.x, p.y + dy * distance)) {
+      if (isWalkable(p.x, p.y + dy * distance)) {
         p.y += dy * distance;
         moved = true;
       }
@@ -534,11 +555,11 @@ export class World {
         Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 2 : 1) : dy > 0 ? 0 : 3;
       this.step += dt;
     }
-    if (p.x < 752 && !this.state.inCamp) {
+    if (p.y >= CAMP_ENTRY_Y && !this.state.inCamp) {
       enterCamp(this.state);
       this.onChange();
     }
-    if (p.x >= 920 && this.state.inCamp) {
+    if (atFishingSpot(p) && this.state.inCamp) {
       enterLake(this.state, this.balance);
       this.onChange();
     }
@@ -562,9 +583,10 @@ export class World {
       }
       if (events.length) this.onChange();
     }
-    const cameraTarget = this.state.inCamp ? 0 : 640;
-    this.camera += (cameraTarget - this.camera) * Math.min(1, dt * 3.6);
-    if (Math.abs(this.camera - cameraTarget) < 0.15) this.camera = cameraTarget;
+    const cameraTarget = cameraYFor(this.state.player);
+    this.cameraY += (cameraTarget - this.cameraY) * Math.min(1, dt * 5);
+    if (Math.abs(this.cameraY - cameraTarget) < 0.15)
+      this.cameraY = cameraTarget;
     for (const p of this.particles) {
       p.life -= dt;
       p.x += p.vx * dt;
@@ -604,15 +626,20 @@ export class World {
   private drawDecoration(d: Decoration): void {
     const c = this.context,
       sprite = this.sprites[d.image];
-    if (d.x < this.camera - 180 || d.x > this.camera + VIEW_W + 180) return;
+    if (d.y < this.cameraY - 40 || d.y > this.cameraY + VIEW_H + 400) return;
     const vertical = this.spriteYScale;
+    const scale = Math.min(
+      d.scale,
+      (d.maxHeight ?? Infinity) /
+        ((sprite?.height ?? d.crop?.[3] ?? 1) * vertical),
+    );
     if (sprite)
       c.drawImage(
         sprite,
-        Math.round(d.x - (sprite.width * d.scale) / 2),
-        Math.round(d.y - sprite.height * d.scale * vertical),
-        Math.round(sprite.width * d.scale),
-        Math.round(sprite.height * d.scale * vertical),
+        Math.round(d.x - (sprite.width * scale) / 2),
+        Math.round(d.y - sprite.height * scale * vertical),
+        Math.round(sprite.width * scale),
+        Math.round(sprite.height * scale * vertical),
       );
     else if (d.crop) {
       const [sx, sy, sw, sh] = d.crop;
@@ -622,10 +649,10 @@ export class World {
         sy,
         sw,
         sh,
-        Math.round(d.x - (sw * d.scale) / 2),
-        Math.round(d.y - sh * d.scale * vertical),
-        sw * d.scale,
-        sh * d.scale * vertical,
+        Math.round(d.x - (sw * scale) / 2),
+        Math.round(d.y - sh * scale * vertical),
+        sw * scale,
+        sh * scale * vertical,
       );
     }
   }
@@ -637,10 +664,10 @@ export class World {
     c.ellipse(p.x, p.y + 1, 17, 6, 0, 0, Math.PI * 2);
     c.fill();
     const mode = this.moving ? "walk" : "idle";
-    const body = this.assets[`player-${mode}-body`];
+    // The north-facing idle row has four frames; later sheet cells are empty.
     const frame = this.moving
       ? Math.floor(this.step * 9) % 6
-      : Math.floor(this.waterTime * 3) % (body.width / 64);
+      : Math.floor(this.waterTime * 3) % 4;
     const vertical = this.spriteYScale;
     for (const part of ["body", "head"])
       c.drawImage(
@@ -654,7 +681,7 @@ export class World {
         128,
         128 * vertical,
       );
-    if (!this.state.inCamp && !this.moving) {
+    if (!this.state.inCamp && atFishingSpot(p) && !this.moving) {
       const point = this.worldPointer();
       c.lineWidth = 3;
       c.strokeStyle = this.state.rod ? "#e2c784" : "#6b4535";
@@ -666,17 +693,17 @@ export class World {
       c.strokeStyle = "#f3edcbb0";
       c.beginPath();
       c.moveTo(p.x + 34, p.y - 62);
-      if (point && point.x > 1110 && !this.paused) {
+      if (point && inPond(point) && !this.paused) {
         c.quadraticCurveTo((p.x + point.x) / 2, point.y - 85, point.x, point.y);
       } else {
-        c.quadraticCurveTo(p.x + 75, p.y - 32, p.x + 63, p.y + 35);
+        c.quadraticCurveTo(p.x + 44, p.y - 100, p.x + 24, p.y - 108);
       }
       c.stroke();
-      if (!point || point.x <= 1110) {
+      if (!point || !inPond(point)) {
         c.fillStyle = "#f2e7bf";
-        c.fillRect(p.x + 61, p.y + 32, 5, 6);
+        c.fillRect(p.x + 22, p.y - 111, 5, 6);
         c.fillStyle = "#d47e66";
-        c.fillRect(p.x + 61, p.y + 35, 5, 3);
+        c.fillRect(p.x + 22, p.y - 108, 5, 3);
       }
     }
     if (this.route.length) {
@@ -692,12 +719,13 @@ export class World {
     const c = this.context;
     c.clearRect(0, 0, VIEW_W, VIEW_H);
     c.save();
-    c.translate(-Math.round(this.camera), 0);
+    c.translate(0, -Math.round(this.cameraY));
     c.drawImage(this.terrain, 0, 0);
     const time = this.reducedMotion ? 0 : this.waterTime;
     for (let i = 0; i < 125; i++) {
-      const x = 822 + ((i * 139.7) % 1090),
-        y = 105 + ((i * 71.9) % 610);
+      const x = 75 + ((i * 139.7) % 1130),
+        y = 125 + ((i * 71.9) % 480);
+      if (x > 555 && x < 724 && y > DOCK.top - 30) continue;
       c.globalAlpha = 0.12 + (Math.sin(time * 0.9 + i * 2.3) + 1) * 0.12;
       c.fillStyle = "#c2e5d6";
       c.fillRect(
@@ -713,9 +741,9 @@ export class World {
     if (!this.reducedMotion) {
       c.fillStyle = "#2a6d7720";
       for (let i = 0; i < 4; i++) {
-        const x = 950 + ((i * 323 + time * 4) % 1040);
+        const x = 160 + ((i * 281 + time * 4) % 980);
         c.beginPath();
-        c.ellipse(x, 80 + i * 160, 95, 35, -0.15, 0, Math.PI * 2);
+        c.ellipse(x, 150 + i * 90, 95, 35, -0.15, 0, Math.PI * 2);
         c.fill();
       }
     }
@@ -728,7 +756,7 @@ export class World {
         !!pointer &&
         !this.paused &&
         !this.state.inCamp &&
-        this.state.player.x >= 920 &&
+        atFishingSpot(this.state.player) &&
         Math.hypot(pos.x - pointer.x, pos.y - pointer.y) <= stats.radius + 12;
       if (active) this.hoveredFish = fish.id;
       c.fillStyle = "#1e56655a";
@@ -799,8 +827,11 @@ export class World {
       c.globalAlpha = 0.35 + (0.4 * (Math.sin(time * 1.5 + i) + 1)) / 2;
       c.fillStyle = "#ffefae";
       c.fillRect(
-        520 + i * 15 + Math.sin(time + i) * 8,
-        240 + Math.sin(i * 2) * 50 + Math.cos(time + i) * 8,
+        STATIONS.tree.x - 47 + i * 15 + Math.sin(time + i) * 8,
+        STATIONS.tree.y -
+          85 * this.spriteYScale +
+          Math.sin(i * 2) * 30 +
+          Math.cos(time + i) * 8,
         3,
         3,
       );
@@ -808,11 +839,10 @@ export class World {
     c.globalAlpha = 1;
     if (
       pointer &&
-      pointer.x > 1110 &&
-      pointer.y > 110 &&
+      inPond(pointer) &&
       !this.state.inCamp &&
       !this.paused &&
-      this.state.player.x >= 920
+      atFishingSpot(this.state.player)
     ) {
       c.lineWidth = 1.5;
       c.strokeStyle = "#fff5d6bc";

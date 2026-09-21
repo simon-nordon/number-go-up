@@ -18,6 +18,8 @@ const paths: Record<string, string> = {
   edit: '<path d="m15 4 5 5-10 10-6 1 1-6L15 4Zm-8 9 5 5m1-12 5 5"/>',
   arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
   left: '<path d="M20 12H4m6-6-6 6 6 6"/>',
+  up: '<path d="M12 20V4m-6 6 6-6 6 6"/>',
+  down: '<path d="M12 4v16m-6-6 6 6 6-6"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 1v2m0 18v2M1 12h2m18 0h2M4 4l2 2m12 12 2 2M4 20l2-2M18 6l2-2"/>',
   check: '<path d="m5 12 4 4L20 5"/>',

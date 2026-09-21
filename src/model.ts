@@ -4,6 +4,7 @@ import {
   type Balance,
   type SkillId,
 } from "./config.ts";
+import { atFishingSpot, CAMP_START, isWalkable, LAKE_START } from "./layout.ts";
 
 export const SAVE_KEY = "stillwater.save.v1";
 export const BALANCE_KEY = "stillwater.balance.v1";
@@ -18,7 +19,7 @@ export interface Fish {
   tick: number;
 }
 export interface GameState {
-  version: 1;
+  version: 2;
   money: number;
   earned: number;
   caught: number;
@@ -132,9 +133,9 @@ export function spawnTrip(
   const available = balance.species.slice(0, stats.species);
   const weight = available.reduce((sum, fish) => sum + fish.weight, 0);
   const firstPositions = [
-    [1270, 274],
-    [1530, 467],
-    [1748, 314],
+    [330, 300],
+    [890, 375],
+    [660, 225],
   ];
   state.fish = Array.from({ length: stats.population }, (_, i) => {
     let roll = random() * weight;
@@ -152,12 +153,13 @@ export function spawnTrip(
     const position =
       stats.population <= 3
         ? firstPositions[i]
-        : [1200 + random() * 635, 185 + random() * 380];
+        : [200 + random() * 880, 195 + random() * 215];
     // Reserve space for the trip card, including on narrow screens. A fish must
     // never require hovering through an opaque interface element to catch it.
-    if (stats.population > 3 && position[0] > 1390 && position[1] < 320) {
-      position[1] = 320 + random() * 245;
-    }
+    if (position[0] > 770 && position[1] < 320)
+      position[1] = 320 + random() * 90;
+    if (position[0] < 480 && position[1] < 280)
+      position[1] = 280 + random() * 130;
     return {
       id: state.trip * 1000 + i,
       species,
@@ -178,7 +180,7 @@ export function newGame(
   random = Math.random,
 ): GameState {
   const state: GameState = {
-    version: 1,
+    version: 2,
     money: 0,
     earned: 0,
     caught: 0,
@@ -189,7 +191,7 @@ export function newGame(
     rod: false,
     fish: [],
     collection: [0, 0, 0, 0],
-    player: { x: 1030, y: 409 },
+    player: { ...LAKE_START },
     inCamp: false,
     restockReady: false,
     playedSeconds: 0,
@@ -230,7 +232,7 @@ export function tickFishing(
 ): GameEvent[] {
   const events: GameEvent[] = [];
   const stats = getStats(state, balance);
-  const fishing = !state.inCamp && state.player.x >= 920 && pointer;
+  const fishing = !state.inCamp && atFishingSpot(state.player) && pointer;
   for (const fish of state.fish) {
     const pos = fishPosition(fish, state.playedSeconds);
     if (
@@ -288,10 +290,12 @@ export function parseSave(
 ): GameState | null {
   if (!raw) return null;
   try {
-    const s = JSON.parse(raw) as GameState;
+    const s = JSON.parse(raw) as Omit<GameState, "version"> & {
+      version: number;
+    };
     if (
       !s ||
-      s.version !== 1 ||
+      (s.version !== 1 && s.version !== 2) ||
       !s.levels ||
       !s.player ||
       typeof s.rod !== "boolean" ||
@@ -316,10 +320,18 @@ export function parseSave(
       !Number.isInteger(s.tripTotal)
     )
       return null;
-    if (
-      !finite(s.player.x, 70, 1080) ||
-      !finite(s.player.y, 150, 620) ||
-      (s.player.x > 750 && (s.player.y < 381 || s.player.y > 440))
+    const legacy = s.version === 1;
+    if (legacy) {
+      if (
+        !finite(s.player.x, 70, 1080) ||
+        !finite(s.player.y, 150, 622) ||
+        (s.player.x > 750 && (s.player.y < 381 || s.player.y > 440))
+      )
+        return null;
+    } else if (
+      !finite(s.player.x, 100, 1180) ||
+      !finite(s.player.y, 474, 1368) ||
+      !isWalkable(s.player.x, s.player.y)
     )
       return null;
     for (const id of SKILL_IDS)
@@ -346,8 +358,8 @@ export function parseSave(
         !Number.isInteger(f.id) ||
         !finite(f.species, 0, 3) ||
         !Number.isInteger(f.species) ||
-        !finite(f.x, 1150, 1880) ||
-        !finite(f.y, 160, 610) ||
+        !finite(f.x, legacy ? 1150 : 180, legacy ? 1880 : 1100) ||
+        !finite(f.y, legacy ? 160 : 180, legacy ? 610 : 430) ||
         !finite(f.phase, 0, Math.PI * 2) ||
         !finite(f.hp, 0.0001, 100000) ||
         !finite(f.maxHp, f.hp, 100000) ||
@@ -356,8 +368,19 @@ export function parseSave(
         return null;
       ids.add(f.id);
     }
-    reconcileBalance(s, balance);
-    return s;
+    if (legacy) {
+      // Keep the wallet, upgrades and partial trip when moving the old map south.
+      s.player = { ...(s.inCamp ? CAMP_START : LAKE_START) };
+      for (const fish of s.fish) {
+        fish.x = 220 + ((fish.x - 1150) / 730) * 860;
+        fish.y = 200 + ((fish.y - 160) / 450) * 210;
+        if (fish.x > 770) fish.y = Math.max(320, fish.y);
+        if (fish.x < 480) fish.y = Math.max(280, fish.y);
+      }
+    }
+    const state: GameState = { ...s, version: 2 };
+    reconcileBalance(state, balance);
+    return state;
   } catch {
     return null;
   }

@@ -24,7 +24,8 @@ import {
   spawnTrip,
   type GameState,
 } from "./model.ts";
-import { STATIONS, World } from "./world.ts";
+import { BUILDING_PLOTS, STATIONS, VIEW_H, VIEW_W } from "./layout.ts";
+import { World } from "./world.ts";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const devMode = import.meta.env.DEV;
@@ -78,21 +79,22 @@ const item = (
 app.innerHTML = `
   <header class="topbar">
     <a class="brand" href="#" aria-label="Stillwater home">${icon("fish", 34)}<span>stillwater<span class="brand-note">A LITTLE CATCH. A LITTLE GROWTH.</span></span></a>
-    <nav class="place-nav" aria-label="Travel"><button data-travel="lake" class="nav-button">${icon("fish", 17)} The lake</button><button data-travel="camp" class="nav-button">${icon("home", 17)} Your camp</button></nav>
+    <nav class="place-nav" aria-label="Travel"><button data-travel="lake" class="nav-button">${icon("fish", 17)} The pond</button><button data-travel="camp" class="nav-button">${icon("home", 17)} Your base</button></nav>
     <div class="header-actions"><button class="icon-button" data-action="journal" aria-label="Open field guide" title="Field guide">${icon("book")}</button><button class="icon-button" data-action="sound" aria-label="Mute sound" title="Toggle sound"></button><button class="icon-button" data-action="settings" aria-label="Open settings" title="Settings">${icon("settings")}</button>${devMode ? `<span class="header-divider"></span><button class="dev-button" data-action="editor" aria-label="Edit balance" title="Edit balance (F2)">${icon("edit", 15)}<span>Edit balance</span><small>DEV</small></button>` : ""}</div>
   </header>
   <main class="game-shell">
     <div class="above-world"><div class="session-label"><span class="status-dot"></span><span id="session-title">A good day to go fishing.</span></div><div class="wallet" aria-label="Wallet"><span class="wallet-label">YOUR POCKET</span><span class="coin-dot">$</span><strong id="money" aria-live="polite">$0</strong></div></div>
     <section class="game-stage" aria-label="Stillwater game world">
-      <canvas id="world" tabindex="0" aria-label="Fishing lake. Move with WASD or arrow keys, hover over fish to catch them, and walk left to the camp."></canvas>
-      <div class="location-label"><span class="eyebrow" id="location-eyebrow">A PLACE TO SLOW DOWN</span><h1 id="location-name">Stillwater lake<span class="small-spark">✦</span></h1><span class="location-weather">${icon("sun", 13)} <span>A little sun. A little luck.</span></span></div>
-      <div class="trip-card"><div class="trip-top"><span class="eyebrow">FISHING TRIP <span id="trip-number">01</span></span><span class="live-dot"></span></div><div class="trip-count">${icon("fish", 24)}<strong id="fish-left">3</strong><span>in the lake</span></div><div class="trip-progress"><span id="trip-progress"></span></div><div class="trip-bottom"><span id="trip-caught">0 / 3 caught</span><span id="trip-value">$1 per minnow</span></div></div>
+      <canvas id="world" tabindex="0" aria-label="Fishing pond above your base. Move with WASD or arrow keys, hover over fish to catch them, and walk down to the skill tree, shop, and three empty building plots."></canvas>
+      <div class="location-label"><span class="eyebrow" id="location-eyebrow">A PLACE TO SLOW DOWN</span><h1 id="location-name">Stillwater pond<span class="small-spark">✦</span></h1><span class="location-weather">${icon("sun", 13)} <span>A little sun. A little luck.</span></span></div>
+      <div class="trip-card"><div class="trip-top"><span class="eyebrow">FISHING TRIP <span id="trip-number">01</span></span><span class="live-dot"></span></div><div class="trip-count">${icon("fish", 24)}<strong id="fish-left">3</strong><span>in the pond</span></div><div class="trip-progress"><span id="trip-progress"></span></div><div class="trip-bottom"><span id="trip-caught">0 / 3 caught</span><span id="trip-value">$1 per minnow</span></div></div>
       <button class="world-sign tree-sign" data-travel="tree" aria-label="Walk to the skill tree">${icon("tree", 17)}<span>The old willow<small>SKILL TREE</small></span><span class="sign-arrow">↗</span></button>
       <button class="world-sign shop-sign" data-travel="shop" aria-label="Walk to the tackle shop">${icon("bag", 16)}<span>Tackle & twine<small>ROD SHOP</small></span><span class="sign-arrow">↗</span></button>
+      ${BUILDING_PLOTS.map((_, index) => `<div class="building-plot-label" data-plot="${index}" aria-label="Empty building plot ${index + 1}. To be revealed." hidden><span class="plot-mystery">?</span><span>To be revealed</span><small>FUTURE BUILDING</small></div>`).join("")}
       <div class="world-tip" id="world-tip"></div>
-      <button class="travel-sign" id="travel-sign" data-travel="camp">${icon("left", 17)} Back to camp <kbd>A</kbd></button>
+      <button class="travel-sign" id="travel-sign" data-travel="camp">${icon("down", 17)} Back to base <kbd>S</kbd></button>
       <div class="interaction-hint" id="interaction-hint" hidden></div>
-      <div class="pond-empty" id="pond-empty" hidden><span class="empty-icon">${icon("check", 24)}</span><span class="eyebrow">A LITTLE WELL EARNED</span><h2>A good day's catch.</h2><p>Head back to camp, plant an upgrade,<br>and see what the next trip brings.</p><button class="primary-button" data-travel="tree">Visit the skill tree ${icon("arrow", 17)}</button></div>
+      <div class="pond-empty" id="pond-empty" hidden><span class="empty-icon">${icon("check", 24)}</span><span class="eyebrow">A LITTLE WELL EARNED</span><h2>A good day's catch.</h2><p>Head down to base, plant an upgrade,<br>and see what the next trip brings.</p><button class="primary-button" data-travel="tree">Visit the skill tree ${icon("down", 17)}</button></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div class="loading-screen" id="loading"><span class="loading-fish">${icon("fish", 48)}</span><h2>Finding a quiet spot…</h2><p>Unpacking your tackle box.</p></div>
       <div class="touch-controls" aria-label="Touch movement controls"><button data-direction="a" aria-label="Walk left">←</button><div><button data-direction="w" aria-label="Walk up">↑</button><button data-direction="s" aria-label="Walk down">↓</button></div><button data-direction="d" aria-label="Walk right">→</button></div>
@@ -171,7 +173,7 @@ function updateUI(force = false): void {
       }
     });
   $("#location-name").innerHTML =
-    `${state.inCamp ? "Your little camp" : "Stillwater lake"}<span class="small-spark">✦</span>`;
+    `${state.inCamp ? "Your little base" : "Stillwater pond"}<span class="small-spark">✦</span>`;
   $("#location-eyebrow").textContent = state.inCamp
     ? "GROW SOMETHING GOOD"
     : "A PLACE TO SLOW DOWN";
@@ -179,21 +181,22 @@ function updateUI(force = false): void {
     ? "Big things start with little upgrades."
     : "A good day to go fishing.";
   $(".game-stage").classList.toggle("in-camp", state.inCamp);
+  $(".trip-card").hidden = state.inCamp;
   $("#pond-empty").hidden = state.fish.length !== 0 || state.inCamp;
   const travel = $("#travel-sign");
   travel.dataset.travel = state.inCamp ? "lake" : "camp";
   travel.innerHTML = state.inCamp
-    ? `To the lake ${icon("arrow", 17)} <kbd>D</kbd>`
-    : `${icon("left", 17)} Back to camp <kbd>A</kbd>`;
+    ? `${icon("up", 17)} Up to the pond <kbd>W</kbd>`
+    : `${icon("down", 17)} Down to your base <kbd>S</kbd>`;
   if (state.inCamp)
     $("#world-tip").innerHTML =
-      `<span class="tip-icon">${icon("tree", 20)}</span><div><strong>A little room to grow.</strong><p>Visit the old willow to spend your catch.<br>Your next trip has <b>${stats.population} fish</b> waiting.</p></div>`;
+      `<span class="tip-icon">${icon("home", 20)}</span><div><strong>A little room to grow.</strong><p>Two familiar places. Three possibilities.<br><b>${stats.population} fish</b> on your next trip north.</p></div>`;
   else if (state.caught === 0)
     $("#world-tip").innerHTML =
       `<span class="tip-icon">${icon("mouse", 21)}</span><div><strong>Patience pays.</strong><p>Hold your cursor over a fish.<br>Every little tick brings it closer.</p></div>`;
   else
     $("#world-tip").innerHTML =
-      `<span class="tip-icon">${icon("fish", 21)}</span><div><strong>${state.levels.population === 0 ? "Your first little fortune." : "Cast. Catch. Grow. Repeat."}</strong><p>${state.levels.population === 0 ? "Three minnows. Three dollars.<br>A bigger lake begins at the old willow." : `Catch the lake, then head back to camp.<br>There’s always a little more to grow.`}</p></div>`;
+      `<span class="tip-icon">${icon("fish", 21)}</span><div><strong>${state.levels.population === 0 ? "Your first little fortune." : "Cast. Catch. Grow. Repeat."}</strong><p>${state.levels.population === 0 ? "Three minnows. Three dollars.<br>Walk down to grow at the old willow." : `Catch the pond, then head down to base.<br>There’s always a little more to grow.`}</p></div>`;
   if (state.inCamp !== lastZone) {
     lastZone = state.inCamp;
     save();
@@ -307,7 +310,7 @@ function openSkills(): void {
       }).join("")}
       <div class="map-legend"><span class="status-dot"></span> Ready to grow <span class="legend-line"></span> Follow your own pace</div>
     </div><div class="skill-detail"><span class="detail-icon">${icon(skill.icon, 32)}</span><div class="level-tag">LEVEL ${level} / ${balance.skills[id].max}</div><h3>${skill.name}</h3><em>${skill.subtitle}</em><p>${skill.description}</p><div class="effect-comparison"><span>RIGHT NOW<strong>${skillEffect(id)}</strong></span>${!maxed ? `${icon("arrow", 19)}<span>AFTER UPGRADE<strong>${skillEffect(id, true)}</strong></span>` : '<span class="maxed-label">Fully grown. Nicely done.</span>'}</div>${id === "species" && !maxed ? `<div class="next-fish">${item(["fish", "perch", "koi", "trout"][Math.min(3, getStats(state, balance).species)] as "fish")}<span>Next arrival<strong>${balance.species[Math.min(3, getStats(state, balance).species)].name}</strong></span></div>` : ""}<div class="skill-buy-area"><div class="purchase-note">${requirement ?? (maxed ? "This skill has reached its full potential." : id === "population" && level < 3 ? "Your first three levels are just $1 each." : "One small upgrade, every future trip.")}</div><button class="primary-button purchase-button" data-action="buy-skill" ${!affordable ? "disabled" : ""}>${maxed ? `${icon("check", 17)} Fully grown` : `${icon("coin", 18)} Upgrade <strong>${money(cost)}</strong>`}</button><span class="balance-note">${!maxed && !requirement && state.money < cost ? `${money(cost - state.money)} more to go · ` : ""}In your pocket: ${money(state.money)}</span></div></div></div>
-    <div class="dialog-footer"><span>${icon("save", 14)} Every upgrade stays with you.</span><button class="text-button" data-action="back-to-lake">Back to the lake ${icon("arrow", 16)}</button></div>`,
+    <div class="dialog-footer"><span>${icon("save", 14)} Every upgrade stays with you.</span><button class="text-button" data-action="back-to-lake">Up to the pond ${icon("up", 16)}</button></div>`,
     true,
   );
 }
@@ -322,7 +325,7 @@ function openShop(): void {
     `${dialogHeader("TACKLE & TWINE · THE VILLAGE SHOP", "Made for the long cast.", "Good tools. Quiet mornings. Something to save up for.")}
     <div class="shop-note"><span class="merchant-portrait"></span><p>“That old rod’s got heart. But this one?<br>This one’s got a little magic in it.”<small>— EDWIN, YOUR LOCAL TACKLE ENTHUSIAST</small></p></div>
     <div class="rod-product"><div class="rod-illustration">${item("goldrod", "large")}<span class="rod-spark one">✦</span><span class="rod-spark two">✧</span><span class="eyebrow">MASTERWORK NO. 001</span></div><div class="rod-description"><span class="level-tag">A LITTLE GOLD GOES A LONG WAY</span><h3>The gilded reed</h3><p>Light as a reed. Strong as your ambitions. A rod for the angler who’s ready for bigger things.</p><div class="rod-perk">${icon("hook", 21)}<span><strong>${num(balance.rod.multiplier)}× total damage</strong><small>Multiplies your hook upgrades, too.</small></span></div><button class="primary-button purchase-button" data-action="buy-rod" ${state.rod || !affordable ? "disabled" : ""}>${state.rod ? `${icon("check", 18)} Equipped & ready` : `Make it yours <strong>${money(balance.rod.cost)}</strong>`}</button><span class="balance-note">${state.rod ? "Here’s to your next big catch." : `${money(state.money)} saved of ${money(balance.rod.cost)}`}</span><div class="shop-progress"><span style="width:${Math.min(100, (state.money / balance.rod.cost) * 100)}%"></span></div></div></div>
-    <div class="dialog-footer"><span>${icon("check", 14)} Your rod equips automatically.</span><button class="text-button" data-action="back-to-lake">Take it to the lake ${icon("arrow", 16)}</button></div>`,
+    <div class="dialog-footer"><span>${icon("check", 14)} Your rod equips automatically.</span><button class="text-button" data-action="back-to-lake">Up to the pond ${icon("up", 16)}</button></div>`,
     true,
   );
 }
@@ -338,7 +341,7 @@ function openJournal(): void {
 function openSettings(): void {
   openDialog(
     "settings",
-    `${dialogHeader("MAKE YOURSELF AT HOME", "The little things.", "Settle in. This is your little corner of the world.")}<div class="settings-content"><label class="setting-row"><span><strong>Sounds of a good catch</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>A little less motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>A quick field note</h3><p>Move with <b>WASD</b> or the <b>arrow keys</b>. You can also click a path or a destination sign to walk there.</p><p>Stand at the end of the dock and <b>hover over fish</b>. Catches automatically turn into money. Walk left to camp, then click the willow or shop; press <b>E</b> when nearby.</p><p>The lake restocks when you return from camp. Each trip begins with your upgraded fish population. Your catches, upgrades, and current trip save in this browser.</p></div><div class="credits">CraftPix pixel art · Built with TypeScript & a little patience.<br>Keyboard and mouse recommended. Touch: hold a fish to catch it.</div></div>`,
+    `${dialogHeader("MAKE YOURSELF AT HOME", "The little things.", "Settle in. This is your little corner of the world.")}<div class="settings-content"><label class="setting-row"><span><strong>Sounds of a good catch</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>A little less motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>A quick field note</h3><p>Move with <b>WASD</b> or the <b>arrow keys</b>. You can also click a path or a destination sign to walk there.</p><p>Stand at the end of the dock and <b>hover over fish</b>. Catches automatically turn into money. Walk down to your base, then click the willow or shop; press <b>E</b> when nearby.</p><p>Walk north to the dock to restock the pond. Three empty plots in your base are reserved for future buildings. Each trip begins with your upgraded fish population. Your catches, upgrades, and current trip save in this browser.</p></div><div class="credits">CraftPix pixel art · Built with TypeScript & a little patience.<br>Keyboard and mouse recommended. Touch: hold a fish to catch it.</div></div>`,
   );
   $("#sound-setting").addEventListener("change", (e) => {
     audio.enabled = (e.target as HTMLInputElement).checked;
@@ -635,18 +638,25 @@ async function boot(): Promise<void> {
     const signs = () => {
       for (const [id, station] of Object.entries(STATIONS)) {
         const sign = $(`.${id}-sign`),
-          x = station.x - world.camera;
-        sign.style.left = `${(x / 1280) * 100}%`;
-        sign.style.top = `${((station.y - 70) / 720) * 100}%`;
-        sign.hidden = x < 75 || x > 1210;
+          y = station.y + 2 - world.cameraY;
+        sign.style.left = `${(station.x / VIEW_W) * 100}%`;
+        sign.style.top = `${(y / VIEW_H) * 100}%`;
+        sign.hidden = !state.inCamp || y < 135 || y > VIEW_H - 65;
       }
+      BUILDING_PLOTS.forEach((plot, index) => {
+        const label = $(`[data-plot="${index}"]`);
+        const y = plot.y - world.cameraY;
+        label.style.left = `${(plot.x / VIEW_W) * 100}%`;
+        label.style.top = `${(y / VIEW_H) * 100}%`;
+        label.hidden = !state.inCamp || y < 100 || y > VIEW_H - 70;
+      });
       const nearest = world.nearestStation();
       const hint = $("#interaction-hint");
       hint.hidden = !nearest || modal.open;
       if (nearest) {
         hint.innerHTML = `<kbd>E</kbd> ${nearest === "tree" ? "Grow your skills" : "Browse the shop"}`;
-        hint.style.left = `${((state.player.x - world.camera) / 1280) * 100}%`;
-        hint.style.top = `${((state.player.y + 49) / 720) * 100}%`;
+        hint.style.left = `${(state.player.x / VIEW_W) * 100}%`;
+        hint.style.top = `${((state.player.y + 49 - world.cameraY) / VIEW_H) * 100}%`;
       }
       requestAnimationFrame(signs);
     };
@@ -669,7 +679,7 @@ if (devMode)
       state: structuredClone(state),
       balance: structuredClone(balance),
       stats: getStats(state, balance),
-      camera: world?.camera,
+      cameraY: world?.cameraY,
       paused: world?.paused,
       dialog: currentDialog,
       ready: !!world,

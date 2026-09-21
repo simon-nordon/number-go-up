@@ -35,10 +35,11 @@ Each player saves progress in their own browser. The hosted production build has
 
 - Start at the dock with **three silver minnows**, **$0**, and a beginner's rod.
 - **Hover over a fish** to deal 1 damage every 650ms. Minnows have 4 HP. Catches automatically earn **$1**.
-- Move with **WASD / arrows**, or click a walkable path. Walk left off the dock to enter camp. The destination buttons also walk your character there.
+- Move with **WASD / arrows**, or click a walkable path. Walk **down** off the north-facing dock to enter your base; walk **up** to return to the pond. The camera follows vertically. The destination buttons also walk your character there.
 - Click **The old willow**, or press **E** nearby, to open the skill tree. **B** walks to the tree. The first three **Pond life** upgrades cost **$1 each** and each add one fish to future trips.
 - Return to the dock for a new trip. With three Pond life levels, **six fish** are waiting. Trips are finite: fish do not respawn until you visit camp and return. Leaving early starts a fresh trip when you return.
 - Follow the branches for damage, faster ticks, a larger cursor, and three additional fish species. The latest unlocked species is guaranteed to appear at least once each trip.
+- The base has the **old willow** and **Tackle & twine**, plus **three empty, staked plots** marked “To be revealed” for future buildings.
 - Visit **Tackle & twine** for **The gilded reed**, a **$1,000** rod that multiplies total damage by **5**.
 - Open the book in the header for your field guide. **Escape** opens settings or closes a dialog.
 
@@ -56,7 +57,7 @@ The committed defaults live in [`src/config.ts`](src/config.ts). To ship a tuned
 
 ## Saving
 
-Progress saves after catches and purchases, on zone changes, every five seconds, and when the page is hidden. Your wallet, upgrades, collection, position, and partially caught current trip survive a reload. There is no offline income. Simulation pauses in background tabs and menus.
+Progress saves after catches and purchases, on zone changes, every five seconds, and when the page is hidden. Your wallet, upgrades, collection, position, and partially caught current trip survive a reload. Saves from the original horizontal map migrate to the vertical layout, preserving progress and placing the character safely at the pond or base. There is no offline income. Simulation pauses in background tabs and menus.
 
 Storage keys:
 
@@ -81,15 +82,16 @@ The extraction script rejects paths outside each pack's destination and skips ma
 
 ## Project map
 
-| File                  | Responsibility                                                   |
-| --------------------- | ---------------------------------------------------------------- |
-| `src/config.ts`       | Default balance, skill definitions, import validation            |
-| `src/model.ts`        | Pure game rules: ticks, trips, purchases, stats, save validation |
-| `src/world.ts`        | Canvas scene, character movement, collision, camera, effects     |
-| `src/main.ts`         | Interface, dialogs, live editor, local saves                     |
-| `src/audio.ts`        | Small synthesized catch and upgrade sounds                       |
-| `src/style.css`       | Interface and responsive layout                                  |
-| `tests/model.test.ts` | Meaningful game-rule regression tests                            |
+| File                  | Responsibility                                                    |
+| --------------------- | ----------------------------------------------------------------- |
+| `src/config.ts`       | Default balance, skill definitions, import validation             |
+| `src/model.ts`        | Pure game rules: ticks, trips, purchases, stats, save validation  |
+| `src/layout.ts`       | Vertical map geometry, stations, future plots, and walking routes |
+| `src/world.ts`        | Canvas scene, character movement, collision, camera, effects      |
+| `src/main.ts`         | Interface, dialogs, live editor, local saves                      |
+| `src/audio.ts`        | Small synthesized catch and upgrade sounds                        |
+| `src/style.css`       | Interface and responsive layout                                   |
+| `tests/model.test.ts` | Meaningful game-rule regression tests                             |
 
 This is a first playable slice: one lake, one camp, five skill branches, four fish species, and one purchasable rod. Multiplayer, additional biomes, quests, and prestige are outside this slice.
 
