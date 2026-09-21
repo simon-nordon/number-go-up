@@ -721,6 +721,11 @@ export class World {
     c.save();
     c.translate(0, -Math.round(this.cameraY));
     c.drawImage(this.terrain, 0, 0);
+    // Shade the scenery before drawing fish so catch targets retain their contrast.
+    c.fillStyle = "#081a36";
+    c.globalAlpha = 0.32;
+    c.fillRect(0, 0, VIEW_W, WORLD_H);
+    c.globalAlpha = 1;
     const time = this.reducedMotion ? 0 : this.waterTime;
     for (let i = 0; i < 125; i++) {
       const x = 75 + ((i * 139.7) % 1130),
@@ -801,12 +806,12 @@ export class World {
       }
       if (active) {
         const label = `${species.name} · $${species.value}`;
-        c.font = '600 12px "Trebuchet MS", sans-serif';
+        c.font = "16px Pixelify, monospace";
         c.textAlign = "center";
         const width = c.measureText(label).width + 20;
         c.fillStyle = "#25494c";
         c.beginPath();
-        c.roundRect(pos.x - width / 2, pos.y - 52, width, 24, 4);
+        c.rect(pos.x - width / 2, pos.y - 52, width, 24);
         c.fill();
         c.fillStyle = "#f5f0d9";
         c.fillText(label, pos.x, pos.y - 36);
@@ -878,7 +883,7 @@ export class World {
       c.globalAlpha = Math.min(1, (p.life / p.maxLife) * 2);
       c.fillStyle = p.color;
       if (p.text) {
-        c.font = `700 ${p.text.startsWith("+") ? 23 : 17}px "Trebuchet MS", sans-serif`;
+        c.font = `500 ${p.text.startsWith("+") ? 26 : 20}px Pixelify, monospace`;
         c.textAlign = "center";
         c.strokeStyle = "#315c57";
         c.lineWidth = 3;

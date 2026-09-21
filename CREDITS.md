@@ -11,4 +11,6 @@ Pixel art is from the six CraftPix packs supplied in `assets/craft-pix`:
 
 The license reference files included in the supplied packs are retained under `public/assets/licenses`. Original source archives and extracted editable sources are kept locally under `assets/craft-pix` and excluded from the public repository. Selected runtime sprites are included as part of this game; CraftPix art is not offered as a standalone asset pack.
 
-The interface icons are original SVG paths. Water patterns, shoreline shapes, ripples, the fishing line, and particles are drawn in Canvas. Sound effects are synthesized locally with Web Audio; the game does not request external fonts, media, or services.
+The interface icons are original pixel-grid SVG paths. Water patterns, shoreline shapes, ripples, the fishing line, and particles are drawn in Canvas. Sound effects are synthesized locally with Web Audio; the game does not request external fonts, media, or services.
+
+The interface uses [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans) by the Pixelify Sans Project Authors, distributed under the SIL Open Font License 1.1. The font is self-hosted in `public/fonts`, alongside its `OFL.txt` license.

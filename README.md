@@ -41,9 +41,9 @@ Each player saves progress in their own browser. The hosted production build has
 - Follow the branches for damage, faster ticks, a larger cursor, and three additional fish species. The latest unlocked species is guaranteed to appear at least once each trip.
 - The base has the **old willow** and **Tackle & twine**, plus **three empty, staked plots** marked “To be revealed” for future buildings.
 - Visit **Tackle & twine** for **The gilded reed**, a **$1,000** rod that multiplies total damage by **5**.
-- Open the book in the header for your field guide. **Escape** opens settings or closes a dialog.
+- Open the book in the corner for your field guide, equipped rod, and fishing stats. **Escape** opens settings or closes a dialog.
 
-Desktop keyboard and mouse are recommended. Touch users can hold a fish to catch it and use the direction pad to move.
+The dark pixel interface fills the viewport, with mobile portrait as the primary touch layout. Hold a fish to catch it and use the direction pad or destination signs to move. Desktop users can use keyboard and mouse. Skills and the rod shop show your available coins beside the close button; the skill tree stacks above upgrade details on phones.
 
 ## Live balance editing
 
@@ -65,7 +65,7 @@ Storage keys:
 - `stillwater.balance.v1` — local balance overrides
 - `stillwater.sound` / `stillwater.motion` — preferences
 
-Malformed saves recover to a fresh game. Invalid balance imports are rejected. If browser storage is unavailable, play continues for the current session and the footer reports that progress cannot be saved.
+Malformed saves recover to a fresh game. Invalid balance imports are rejected. If browser storage is unavailable, play continues for the current session and a warning appears over the game. Successful saves remain unobtrusive.
 
 ## Assets
 
