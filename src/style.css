@@ -191,17 +191,6 @@ button span {
   box-shadow: 0 3px #0b161d;
   pointer-events: none;
 }
-.trip-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.live-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--green);
-  box-shadow: 0 0 8px #b9df8b40;
-}
 .trip-count {
   display: flex;
   align-items: center;
@@ -232,24 +221,10 @@ button span {
   background: var(--green);
   transition: width 0.2s;
 }
-.trip-bottom {
-  display: block;
-  margin-top: 8px;
-  font-size: 10px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
 
-.stamina-heading {
-  margin-top: 10px;
-  color: var(--gold);
-  font: 11px var(--pixel);
-  letter-spacing: 1px;
-}
 .trip-progress > span {
   background: var(--gold);
 }
-.low-stamina .stamina-heading,
 .low-stamina .trip-count {
   color: #ffad8c;
 }
@@ -604,35 +579,87 @@ kbd {
   align-items: center;
   gap: 8px;
 }
-/* The map uses shared percentage anchors for nodes and connecting paths. */
+/* The canvas and accessible nodes share a world-space camera. */
+.skills-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(1120px, calc(100vw - 24px));
+  height: min(800px, calc(100dvh - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+}
+.skills-dialog .shop-heading {
+  flex-shrink: 0;
+}
 .skills-body {
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  flex: 1;
+  min-height: 0;
 }
 .skill-map {
   position: relative;
-  height: 380px;
-  background-color: #101e27;
-  background-image:
-    linear-gradient(#9fbfac06 1px, transparent 1px),
-    linear-gradient(90deg, #9fbfac06 1px, transparent 1px);
-  background-size: 20px 20px;
-  overflow: hidden;
+  min-height: 0;
+  overflow: clip;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  background: #101e27;
+}
+.skill-map.dragging,
+.skill-map.dragging * {
+  cursor: grabbing;
 }
 .skill-connections {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  fill: none;
-  stroke: #41575b;
+  pointer-events: none;
 }
-.skill-connections path {
-  vector-effect: non-scaling-stroke;
-  stroke-width: 2px;
+.skill-map-content {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
 }
-.skill-connections .unlocked {
-  stroke: #8baa71;
+.tree-controls {
+  position: absolute;
+  z-index: 2;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #3c525e;
+  background: #101e27;
+}
+.tree-controls .icon-button {
+  width: 44px;
+  height: 44px;
+  font: 28px/1 var(--pixel);
+}
+.skill-map .node-icon {
+  height: 28px;
+}
+.pixel-item.node-fish {
+  width: 32px;
+  height: 32px;
+  background-size: 480px 320px;
+}
+.pixel-item.node-fish.perch {
+  background-position: -112px 0;
+}
+.pixel-item.node-fish.koi {
+  background-position: -208px 0;
+}
+.pixel-item.node-fish.trout {
+  background-position: -304px 0;
+}
+.spawn-budget {
+  color: var(--muted);
+  font: 12px/1.2 var(--pixel);
+  margin-top: 10px;
 }
 .skill-node {
   position: absolute;
@@ -698,26 +725,6 @@ kbd {
   color: #293522;
   border: 2px solid #15252c;
   font: 16px/1 var(--pixel);
-}
-.node-population {
-  left: 50%;
-  top: 17%;
-}
-.node-damage {
-  left: 24%;
-  top: 50%;
-}
-.node-speed {
-  left: 76%;
-  top: 50%;
-}
-.node-radius {
-  left: 24%;
-  top: 83%;
-}
-.node-species {
-  left: 76%;
-  top: 83%;
 }
 .skill-detail {
   display: flex;
@@ -816,20 +823,6 @@ kbd {
   font-size: 11px;
   line-height: 1.6;
   margin-top: 12px;
-}
-.next-fish {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 11px;
-  margin-top: 8px;
-}
-.next-fish strong {
-  display: block;
-  margin-top: 5px;
-  color: var(--ink);
-  font-size: 12px;
 }
 /* Inventory sprites are shared with the original game art. */
 .pixel-item {
@@ -1422,10 +1415,6 @@ kbd {
   .trip-count > span {
     font-size: 10px;
   }
-  .trip-bottom {
-    font-size: 10px;
-    margin-top: 6px;
-  }
   .travel-sign {
     left: max(14px, env(safe-area-inset-left));
     bottom: max(20px, env(safe-area-inset-bottom));
@@ -1482,24 +1471,6 @@ kbd {
   .dialog-wallet small {
     font-size: 9px;
   }
-  .skills-body {
-    grid-template-columns: 1fr;
-  }
-  .skill-map {
-    height: clamp(258px, 37dvh, 340px);
-  }
-  .skill-node {
-    width: 120px;
-    height: 78px;
-    gap: 4px;
-  }
-  .node-icon svg {
-    width: 24px;
-    height: 24px;
-  }
-  .skill-node strong {
-    font-size: 14px;
-  }
   .node-level {
     font-size: 11px;
   }
@@ -1535,10 +1506,6 @@ kbd {
   }
   .purchase-note {
     margin-bottom: 8px;
-  }
-  .next-fish {
-    margin-top: 0;
-    height: 54px;
   }
   .rod-product {
     grid-template-columns: 1fr;
@@ -1632,12 +1599,6 @@ kbd {
   .shop-heading {
     gap: 6px;
   }
-  .skill-node {
-    width: 102px;
-  }
-  .skill-node strong {
-    font-size: 12px;
-  }
   .topbar .wallet {
     padding-left: 7px;
     padding-right: 7px;
@@ -1654,27 +1615,11 @@ kbd {
     min-height: 70px;
     padding-block: 8px;
   }
-  .skill-map {
-    height: 310px;
-  }
-  .skill-node {
-    height: 82px;
-  }
   .skill-detail {
     padding: 18px;
   }
 }
 @media (max-width: 650px) and (max-height: 700px) {
-  .skill-map {
-    height: 240px;
-  }
-  .skill-node {
-    height: 72px;
-  }
-  .node-icon svg {
-    width: 22px;
-    height: 22px;
-  }
   .skill-detail {
     padding: 14px;
   }
@@ -1691,5 +1636,61 @@ kbd {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* Keep the fishing HUD and portrait upgrade detail compact. */
+.trip-card {
+  width: 126px;
+  padding: 8px 10px;
+}
+.trip-count {
+  gap: 6px;
+  margin: 0 0 7px;
+}
+.trip-count strong {
+  font-size: 26px;
+}
+.skills-dialog .skill-detail {
+  overflow-y: auto;
+}
+@media (max-width: 650px) {
+  .skills-dialog[open] {
+    width: calc(100vw - 12px);
+    height: calc(100dvh - 12px);
+    max-height: calc(100dvh - 12px);
+  }
+  .skills-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .skills-dialog .skill-detail {
+    padding: 12px 14px;
+    max-height: 45dvh;
+  }
+  .skills-dialog .skill-detail h3 {
+    font-size: 24px;
+  }
+  .skills-dialog .effect-comparison {
+    padding: 8px 10px;
+    margin-top: 10px;
+  }
+  .skills-dialog .effect-comparison strong {
+    margin-top: 2px;
+  }
+  .skills-dialog .skill-buy-area {
+    padding-top: 10px;
+  }
+  .skills-dialog .purchase-note {
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+  .skills-dialog .purchase-button {
+    min-height: 44px;
+    padding-block: 10px;
+  }
+  .tree-controls {
+    bottom: 8px;
+    left: 8px;
   }
 }

@@ -1,6 +1,9 @@
 import {
   DEFAULT_BALANCE,
   SKILL_IDS,
+  SPAWN_SKILLS,
+  SPAWN_CAP,
+  isSpawnSkill,
   type Balance,
   type SkillId,
 } from "./config.ts";
@@ -18,7 +21,7 @@ export interface Fish {
   maxHp: number;
 }
 export interface GameState {
-  version: 3;
+  version: 4;
   money: number;
   earned: number;
   caught: number;
@@ -39,10 +42,11 @@ export interface GameState {
 }
 export interface Stats {
   population: number;
+  stamina: number;
   damage: number;
   tickMs: number;
   radius: number;
-  species: number;
+  spawnRates: number[];
 }
 export type GameEvent = {
   type: "hit" | "catch";
@@ -55,7 +59,18 @@ export type GameEvent = {
 export function getStats(state: GameState, balance: Balance): Stats {
   const level = (id: SkillId) =>
     Math.min(state.levels[id], balance.skills[id].max);
+  let remaining = SPAWN_CAP;
+  const spawnRates = SPAWN_SKILLS.map((id) => {
+    const rate = Math.min(remaining, level(id) * balance.skills[id].amount);
+    remaining -= rate;
+    return rate;
+  });
+  const advancedRate = spawnRates.reduce((sum, rate) => sum + rate, 0);
   return {
+    stamina: Math.min(
+      10000,
+      balance.base.stamina + level("stamina") * balance.skills.stamina.amount,
+    ),
     population: Math.min(
       150,
       Math.floor(
@@ -75,10 +90,7 @@ export function getStats(state: GameState, balance: Balance): Stats {
       220,
       balance.base.radius + level("radius") * balance.skills.radius.amount,
     ),
-    species: Math.min(
-      4,
-      1 + Math.floor(level("species") * balance.skills.species.amount),
-    ),
+    spawnRates: [100 - advancedRate, ...spawnRates],
   };
 }
 export function skillCost(
@@ -88,9 +100,11 @@ export function skillCost(
 ): number {
   const skill = balance.skills[id];
   // A flat-level count of 3 means purchases 1, 2 and 3 all cost the base amount.
-  return Math.ceil(
-    skill.cost *
-      skill.growth ** Math.max(0, level - Math.max(0, skill.flatLevels - 1)),
+  return (
+    Math.ceil(
+      (skill.cost / 10) *
+        skill.growth ** Math.max(0, level - Math.max(0, skill.flatLevels - 1)),
+    ) * 10
   );
 }
 export function skillRequirement(id: SkillId, state: GameState): string | null {
@@ -98,9 +112,28 @@ export function skillRequirement(id: SkillId, state: GameState): string | null {
     return "Requires Pond life level 1";
   if (id === "radius" && state.levels.damage < 1)
     return "Requires Stronger hook level 1";
-  if (id === "species" && state.levels.population < 3)
+  if (id === "perch" && state.levels.population < 3)
     return "Requires Pond life level 3";
+  if (id === "koi" && state.levels.perch < 1)
+    return "Requires Sunset perch level 1";
+  if (id === "trout" && state.levels.koi < 1)
+    return "Requires Rosefin koi level 1";
   return null;
+}
+export function spawnCapReached(
+  id: SkillId,
+  state: GameState,
+  balance: Balance,
+): boolean {
+  return (
+    isSpawnSkill(id) &&
+    SPAWN_SKILLS.reduce(
+      (sum, skill) => sum + state.levels[skill] * balance.skills[skill].amount,
+      0,
+    ) +
+      balance.skills[id].amount >
+      SPAWN_CAP
+  );
 }
 export function purchaseSkill(
   state: GameState,
@@ -110,6 +143,7 @@ export function purchaseSkill(
   if (
     !state.inCamp ||
     skillRequirement(id, state) ||
+    spawnCapReached(id, state, balance) ||
     state.levels[id] >= balance.skills[id].max
   )
     return false;
@@ -133,25 +167,21 @@ function refillPond(
   random = Math.random,
 ): void {
   const stats = getStats(state, balance);
-  const available = balance.species.slice(0, stats.species);
-  const weight = available.reduce((sum, fish) => sum + fish.weight, 0);
   const firstPositions = [
     [330, 300],
     [890, 375],
     [660, 225],
   ];
   state.fish = Array.from({ length: stats.population }, (_, i) => {
-    let roll = random() * weight;
-    let species = available.length - 1;
-    for (let j = 0; j < available.length; j++) {
-      roll -= available[j].weight;
+    let roll = random() * 100;
+    let species = 0;
+    for (let j = 0; j < stats.spawnRates.length; j++) {
+      roll -= stats.spawnRates[j];
       if (roll < 0) {
         species = j;
         break;
       }
     }
-    // Guarantee a new species appears on every trip after its unlock.
-    if (i === 0) species = stats.species - 1;
     const fish = balance.species[species];
     const position =
       stats.population <= 3
@@ -182,8 +212,8 @@ export function spawnTrip(
 ): void {
   state.tripTotal = 0;
   state.tripCaught = 0;
-  state.stamina = balance.base.stamina;
-  state.maxStamina = balance.base.stamina;
+  state.stamina = getStats(state, balance).stamina;
+  state.maxStamina = state.stamina;
   state.castTick = 0;
   state.restockReady = false;
   refillPond(state, balance, random);
@@ -193,7 +223,7 @@ export function newGame(
   random = Math.random,
 ): GameState {
   const state: GameState = {
-    version: 3,
+    version: 4,
     money: 0,
     earned: 0,
     caught: 0,
@@ -203,7 +233,16 @@ export function newGame(
     stamina: balance.base.stamina,
     maxStamina: balance.base.stamina,
     castTick: 0,
-    levels: { population: 0, damage: 0, speed: 0, radius: 0, species: 0 },
+    levels: {
+      population: 0,
+      damage: 0,
+      speed: 0,
+      radius: 0,
+      stamina: 0,
+      perch: 0,
+      koi: 0,
+      trout: 0,
+    },
     rod: false,
     fish: [],
     collection: [0, 0, 0, 0],
@@ -306,6 +345,16 @@ export function tickFishing(
 export function reconcileBalance(state: GameState, balance: Balance): void {
   for (const id of SKILL_IDS)
     state.levels[id] = Math.min(state.levels[id], balance.skills[id].max);
+  // A live balance edit may increase effects. Retain whole levels within the
+  // shared cap, in tree order, so the minnow always keeps at least 20%.
+  let remaining = SPAWN_CAP;
+  for (const id of SPAWN_SKILLS) {
+    state.levels[id] = Math.min(
+      state.levels[id],
+      Math.floor(remaining / balance.skills[id].amount),
+    );
+    remaining -= state.levels[id] * balance.skills[id].amount;
+  }
   for (const fish of state.fish) {
     const fraction = fish.hp / fish.maxHp;
     fish.maxHp = balance.species[fish.species].hp;
@@ -327,7 +376,7 @@ export function parseSave(
     };
     if (
       !s ||
-      (s.version !== 1 && s.version !== 2 && s.version !== 3) ||
+      ![1, 2, 3, 4].includes(s.version) ||
       !s.levels ||
       !s.player ||
       typeof s.rod !== "boolean" ||
@@ -335,7 +384,7 @@ export function parseSave(
       typeof s.restockReady !== "boolean"
     )
       return null;
-    if (s.version === 3) {
+    if (s.version >= 3) {
       if (
         !finite(s.maxStamina, 1, 10000) ||
         !Number.isInteger(s.maxStamina) ||
@@ -361,7 +410,7 @@ export function parseSave(
       !finite(
         s.tripTotal,
         1,
-        s.version === 3 ? (s.maxStamina + 1) * 150 : 150,
+        s.version >= 3 ? (s.maxStamina + 1) * 150 : 150,
       ) ||
       !Number.isInteger(s.tripTotal)
     )
@@ -380,6 +429,24 @@ export function parseSave(
       !isWalkable(s.player.x, s.player.y)
     )
       return null;
+    if (s.version < 4) {
+      const oldLevels = s.levels as Record<string, number>;
+      if (
+        !finite(oldLevels.species, 0, 3) ||
+        !Number.isInteger(oldLevels.species)
+      )
+        return null;
+      s.levels = {
+        population: oldLevels.population,
+        damage: oldLevels.damage,
+        speed: oldLevels.speed,
+        radius: oldLevels.radius,
+        stamina: 0,
+        perch: oldLevels.species >= 1 ? 1 : 0,
+        koi: oldLevels.species >= 2 ? 1 : 0,
+        trout: oldLevels.species >= 3 ? 1 : 0,
+      };
+    }
     for (const id of SKILL_IDS)
       if (!finite(s.levels[id], 0, 100) || !Number.isInteger(s.levels[id]))
         return null;
@@ -425,10 +492,10 @@ export function parseSave(
     }
     const state: GameState = {
       ...s,
-      version: 3,
-      stamina: s.version === 3 ? s.stamina : balance.base.stamina,
-      maxStamina: s.version === 3 ? s.maxStamina : balance.base.stamina,
-      castTick: s.version === 3 ? s.castTick : 0,
+      version: 4,
+      stamina: s.version >= 3 ? s.stamina : balance.base.stamina,
+      maxStamina: s.version >= 3 ? s.maxStamina : balance.base.stamina,
+      castTick: s.version >= 3 ? s.castTick : 0,
       // Drop the old independent fish timers when migrating to shared casts.
       fish: s.fish.map(({ id, species, x, y, phase, hp, maxHp }) => ({
         id,

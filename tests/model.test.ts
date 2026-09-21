@@ -31,7 +31,7 @@ test("the opening trip stops at 10 stamina before all 12 health is caught", () =
   for (const fish of firstFish)
     tickFishing(state, balance, 8, fishPosition(fish, 0));
   assert.equal(state.stamina, 0);
-  assert.equal(state.money, 2);
+  assert.equal(state.money, 20);
   assert.equal(state.caught, 2);
   assert.equal(state.fish.length, 1);
   assert.equal(state.fish[0].hp, 2);
@@ -51,7 +51,7 @@ test("the opening trip stops at 10 stamina before all 12 health is caught", () =
   );
   enterCamp(state);
   for (let i = 0; i < 2; i++) {
-    assert.equal(skillCost("population", i, balance), 1);
+    assert.equal(skillCost("population", i, balance), 10);
     assert.equal(purchaseSkill(state, "population", balance), true);
   }
   enterLake(state, balance, () => 0.5);
@@ -121,7 +121,7 @@ test("clearing a school pays each catch once and refills without restoring stami
     6,
     "twelve hits across four shared ticks cost four stamina",
   );
-  assert.equal(state.money, 3);
+  assert.equal(state.money, 30);
   assert.deepEqual(state.collection, [3, 0, 0, 0]);
   assert.equal(state.trip, 1);
   assert.equal(state.tripCaught, 3);
@@ -129,7 +129,7 @@ test("clearing a school pays each catch once and refills without restoring stami
   assert.equal(state.fish.length, 3);
   assert.ok(state.fish.every((f) => f.hp === 4 && !oldIds.includes(f.id)));
   tickFishing(state, balance, 100, { x: 700, y: 300 });
-  assert.equal(state.money, 3);
+  assert.equal(state.money, 30);
   assert.equal(
     state.stamina,
     6,
@@ -162,7 +162,7 @@ test("a final stamina tick pays all simultaneous catches and does not refill the
   const events = tickFishing(state, balance, 20, { x: 700, y: 300 });
   assert.equal(events.filter((e) => e.type === "catch").length, 3);
   assert.equal(state.stamina, 0);
-  assert.equal(state.money, 3);
+  assert.equal(state.money, 30);
   assert.equal(state.fish.length, 0);
   assert.equal(state.trip, 1);
   assert.equal(state.tripCaught, 3);
@@ -214,7 +214,7 @@ test("locked, maxed and unaffordable upgrades never deduct money", () => {
     state = newGame(balance);
   enterCamp(state);
   state.money = 100;
-  assert.equal(purchaseSkill(state, "species", balance), false);
+  assert.equal(purchaseSkill(state, "perch", balance), false);
   assert.equal(state.money, 100);
   assert.equal(purchaseSkill(state, "damage", balance), false);
   state.levels.population = 1;
@@ -226,39 +226,42 @@ test("locked, maxed and unaffordable upgrades never deduct money", () => {
   assert.equal(state.money, 3);
 });
 
-test("each type of upgrade changes its intended stat and rare fish are guaranteed", () => {
+test("each upgrade changes its intended stat and species rolls are independent", () => {
   const balance = freshBalance(),
     state = newGame(balance);
   enterCamp(state);
   state.money = 1000;
   for (let i = 0; i < 3; i++) purchaseSkill(state, "population", balance);
-  for (const id of ["damage", "speed", "radius", "species"] as const)
+  for (const id of ["damage", "speed", "radius", "perch", "stamina"] as const)
     assert.equal(purchaseSkill(state, id, balance), true);
   const stats = getStats(state, balance);
   assert.equal(stats.population, 6);
   assert.equal(stats.damage, 2);
   assert.equal(stats.tickMs, 1760);
   assert.equal(stats.radius, 42);
-  assert.equal(stats.species, 2);
+  assert.deepEqual(stats.spawnRates, [95, 5, 0, 0]);
+  assert.equal(stats.stamina, 11);
   spawnTrip(state, balance, () => 0);
+  assert.ok(state.fish.every((f) => f.species === 0));
+  spawnTrip(state, balance, () => 0.99);
   assert.equal(state.fish[0].species, 1);
   assert.equal(state.fish[0].hp, 8);
 });
 
-test("the $1,000 rod multiplies upgraded damage and cannot be bought twice", () => {
+test("the $10,000 rod multiplies upgraded damage and cannot be bought twice", () => {
   const balance = freshBalance(),
     state = newGame(balance);
   enterCamp(state);
-  state.money = 999;
+  state.money = 9999;
   assert.equal(purchaseRod(state, balance), false);
-  state.money = 1000;
+  state.money = 10000;
   state.levels.damage = 2;
   assert.equal(purchaseRod(state, balance), true);
   assert.equal(state.money, 0);
   assert.equal(getStats(state, balance).damage, 15);
-  state.money = 1000;
+  state.money = 10000;
   assert.equal(purchaseRod(state, balance), false);
-  assert.equal(state.money, 1000);
+  assert.equal(state.money, 10000);
 });
 
 test("live balance changes preserve damage percentage and clamp skill levels", () => {
@@ -368,6 +371,13 @@ test("legacy horizontal saves migrate without losing purchases or the partial tr
     const legacy = {
       ...original,
       version: 1,
+      levels: {
+        population: original.levels.population,
+        damage: 0,
+        speed: 0,
+        radius: 0,
+        species: 0,
+      },
       inCamp,
       restockReady: inCamp,
       player: inCamp ? { x: 567, y: 385 } : { x: 1030, y: 409 },
@@ -379,7 +389,7 @@ test("legacy horizontal saves migrate without losing purchases or the partial tr
     };
     const migrated = parseSave(JSON.stringify(legacy), balance)!;
     assert.ok(migrated);
-    assert.equal(migrated.version, 3);
+    assert.equal(migrated.version, 4);
     assert.deepEqual(migrated.player, inCamp ? CAMP_START : LAKE_START);
     assert.equal(migrated.money, original.money);
     assert.deepEqual(migrated.levels, original.levels);
@@ -433,11 +443,18 @@ test("legacy vertical saves gain stamina without losing an injured fish or purch
   const legacy = {
     ...old,
     version: 2,
+    levels: {
+      population: state.levels.population,
+      damage: 0,
+      speed: 0,
+      radius: 0,
+      species: 0,
+    },
     fish: old.fish.map((f) => ({ ...f, tick: 400 })),
   };
   const restored = parseSave(JSON.stringify(legacy), balance)!;
   assert.ok(restored);
-  assert.equal(restored.version, 3);
+  assert.equal(restored.version, 4);
   assert.equal(restored.stamina, 10);
   assert.equal(restored.maxStamina, 10);
   assert.equal(restored.castTick, 0);
@@ -452,6 +469,13 @@ test("an old cleared pond continues with full stamina in the same trip", () => {
   const legacy = {
     ...state,
     version: 2,
+    levels: {
+      population: state.levels.population,
+      damage: 0,
+      speed: 0,
+      radius: 0,
+      species: 0,
+    },
     fish: [],
     tripCaught: 3,
     caught: 3,

@@ -5,6 +5,9 @@ import {
   freshBalance,
   SKILLS,
   SKILL_IDS,
+  SPAWN_SKILLS,
+  SPAWN_CAP,
+  isSpawnSkill,
   validateBalance,
   type Balance,
   type SkillId,
@@ -21,11 +24,13 @@ import {
   SAVE_KEY,
   skillCost,
   skillRequirement,
+  spawnCapReached,
   spawnTrip,
   type GameState,
 } from "./model.ts";
 import { BUILDING_PLOTS, STATIONS, VIEW_H, VIEW_W } from "./layout.ts";
 import { World } from "./world.ts";
+import { mountSkillTree, TREE_NODES, type TreeCamera } from "./skill-tree.ts";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const devMode = import.meta.env.DEV;
@@ -60,6 +65,8 @@ let reducedMotion = readStorage("stillwater.motion") === "reduced";
 let world: World;
 let currentDialog = "";
 let selectedSkill: SkillId = "population";
+let treeCamera: TreeCamera | null = null;
+let destroySkillTree: (() => void) | undefined;
 let toastTimer = 0;
 let lastZone = state.inCamp;
 let lastTotal = state.caught;
@@ -86,13 +93,13 @@ app.innerHTML = `
         <div class="wallet" aria-label="Wallet"><span class="coin-dot" aria-hidden="true">${icon("coin", 24)}</span><strong id="money" aria-live="polite">$0</strong></div>
         <div class="header-actions"><button class="icon-button" data-action="journal" aria-label="Open field guide" title="Field guide">${icon("book")}</button><button class="icon-button" data-action="sound" aria-label="Mute sound" title="Toggle sound"></button><button class="icon-button" data-action="settings" aria-label="Open settings" title="Settings">${icon("settings")}</button>${devMode ? `<button class="icon-button dev-button" data-action="editor" aria-label="Edit balance" title="Edit balance (F2)">${icon("edit")}</button>` : ""}</div>
       </header>
-      <div class="trip-card" aria-label="Current fishing trip"><div class="trip-top"><span class="eyebrow">TRIP <span id="trip-number">01</span></span><span class="live-dot"></span></div><div class="stamina-heading">STAMINA</div><div class="trip-count">${icon("bolt", 24)}<strong id="stamina-left">10</strong><span>/ <span id="stamina-max">10</span></span></div><div class="trip-progress" id="stamina-meter" role="progressbar" aria-label="Stamina" aria-valuemin="0"><span id="trip-progress"></span></div><span class="trip-bottom" id="trip-caught">0 caught · 3 in pond</span></div>
+      <div class="trip-card" aria-label="Stamina"><div class="trip-count">${icon("bolt", 20)}<strong id="stamina-left">10</strong><span>/ <span id="stamina-max">10</span></span></div><div class="trip-progress" id="stamina-meter" role="progressbar" aria-label="Stamina" aria-valuemin="0"><span id="trip-progress"></span></div></div>
       <button class="world-sign tree-sign" data-travel="tree" aria-label="Walk to the skill tree">${icon("tree", 20)}<span>Skills</span>${icon("arrow", 12)}</button>
       <button class="world-sign shop-sign" data-travel="shop" aria-label="Walk to the tackle shop">${icon("bag", 20)}<span>Rod shop</span>${icon("arrow", 12)}</button>
       ${BUILDING_PLOTS.map((_, index) => `<div class="building-plot-label" data-plot="${index}" aria-label="Empty building plot ${index + 1}. To be revealed." hidden><span class="plot-mystery">?</span><span>To be revealed</span></div>`).join("")}
       <button class="travel-sign" id="travel-sign" data-travel="camp">${icon("down", 16)} Base <kbd>S</kbd></button>
       <div class="interaction-hint" id="interaction-hint" hidden></div>
-      <div class="trip-ended" id="trip-ended" role="status" hidden><span class="empty-icon">${icon("bolt", 24)}</span><h2>Out of stamina</h2><p>Rest at base, then return for a new trip.</p><button class="primary-button" data-travel="camp">${icon("home", 18)} Return to base ${icon("down", 16)}</button></div>
+      <div class="trip-ended" id="trip-ended" role="status" hidden><h2>Out of stamina</h2><button class="primary-button" data-travel="camp">${icon("home", 18)} Base ${icon("down", 16)}</button></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div class="loading-screen" id="loading"><span class="loading-fish">${icon("fish", 48)}</span><h2>Loading pond…</h2></div>
       <div class="touch-controls" aria-label="Touch movement controls"><button data-direction="a" aria-label="Walk left">←</button><div><button data-direction="w" aria-label="Walk up">↑</button><button data-direction="s" aria-label="Walk down">↓</button></div><button data-direction="d" aria-label="Walk right">→</button></div>
@@ -148,9 +155,6 @@ function updateUI(force = false): void {
   $("#money").textContent = money(state.money);
   $("#stamina-left").textContent = String(state.stamina);
   $("#stamina-max").textContent = String(state.maxStamina);
-  $("#trip-number").textContent = String(state.trip).padStart(2, "0");
-  $("#trip-caught").textContent =
-    `${state.tripCaught} caught · ${state.fish.length} in pond`;
   $("#trip-progress").style.width =
     `${(state.stamina / state.maxStamina) * 100}%`;
   $("#stamina-meter").setAttribute("aria-valuenow", String(state.stamina));
@@ -203,6 +207,8 @@ function openDialog(name: string, content: string, wide = false): void {
   world.paused = true;
   world.stopWalking();
   currentDialog = name;
+  destroySkillTree?.();
+  destroySkillTree = undefined;
   modal.className = `dialog ${wide ? "wide-dialog" : ""} ${name}-dialog`;
   modal.innerHTML = content;
   if (!modal.open) modal.showModal();
@@ -220,6 +226,8 @@ function closeDialog(): void {
   modal.close();
 }
 modal.addEventListener("close", () => {
+  destroySkillTree?.();
+  destroySkillTree = undefined;
   if (world) {
     world.paused = false;
     world.clearInput();
@@ -243,11 +251,13 @@ modal.addEventListener("click", (e) => {
 const dialogHeader = (eyebrow: string, title: string, subtitle = "") =>
   `<div class="dialog-heading"><div>${eyebrow ? `<span class="eyebrow">${eyebrow}</span>` : ""}<h2 id="modal-title">${title}</h2>${subtitle ? `<p>${subtitle}</p>` : ""}</div><button class="close-button" data-action="close" aria-label="Close dialog">${icon("close")}</button></div>`;
 const shopHeader = (title: string, symbol: string) =>
-  `<div class="dialog-heading shop-heading"><h2 id="modal-title">${icon(symbol, 24)} ${title}</h2><div class="wallet dialog-wallet" aria-label="Available coins"><span class="coin-dot" aria-hidden="true">${icon("coin", 24)}</span><span><small>AVAILABLE</small><strong aria-live="polite">${money(state.money)}</strong></span></div><button class="close-button" data-action="close" aria-label="Close dialog">${icon("close")}</button></div>`;
+  `<div class="dialog-heading shop-heading"><h2 id="modal-title">${icon(symbol, 24)} ${title}</h2><div class="wallet dialog-wallet" aria-label="Available coins"><span class="coin-dot" aria-hidden="true">${icon("coin", 24)}</span><strong aria-live="polite">${money(state.money)}</strong></div><button class="close-button" data-action="close" aria-label="Close dialog">${icon("close")}</button></div>`;
 function skillEffect(id: SkillId, next = false): string {
   const clone = structuredClone(state);
   if (next) clone.levels[id]++;
   const stats = getStats(clone, balance);
+  if (isSpawnSkill(id))
+    return `${stats.spawnRates[SPAWN_SKILLS.indexOf(id) + 1]}% spawn`;
   switch (id) {
     case "population":
       return `${stats.population} fish / school`;
@@ -257,8 +267,8 @@ function skillEffect(id: SkillId, next = false): string {
       return `${(stats.tickMs / 1000).toFixed(2)}s between ticks`;
     case "radius":
       return `${num(stats.radius)}px cast radius`;
-    case "species":
-      return `${stats.species} fish species`;
+    case "stamina":
+      return `${stats.stamina} stamina`;
   }
 }
 function openSkills(): void {
@@ -268,24 +278,43 @@ function openSkills(): void {
   }
   const id = selectedSkill,
     skill = SKILLS[id],
-    level = state.levels[id],
-    cost = skillCost(id, level, balance);
-  const maxed = level >= balance.skills[id].max,
-    requirement = skillRequirement(id, state);
-  const affordable = state.money >= cost && !requirement && !maxed;
+    level = state.levels[id];
+  const cost = skillCost(id, level, balance);
+  const maxed = level >= balance.skills[id].max;
+  const capped = spawnCapReached(id, state, balance);
+  const requirement = skillRequirement(id, state);
+  const affordable = state.money >= cost && !requirement && !maxed && !capped;
+  const advancedRate = 100 - getStats(state, balance).spawnRates[0];
+  const visual = (skillId: SkillId, size: number) =>
+    isSpawnSkill(skillId)
+      ? item(skillId, "node-fish")
+      : icon(SKILLS[skillId].icon, size);
   openDialog(
     "skills",
     `${shopHeader("Skills", "tree")}
-    <div class="skills-body"><div class="skill-map" role="group" aria-label="Skill tree">
-      <svg class="skill-connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M50 17V33H24V50M50 33H76V50M24 50V83M50 33V67H76V83"/><path class="unlocked" d="${state.levels.population > 0 ? "M50 17V33H24V50M50 33H76V50" : ""}${state.levels.damage > 0 ? "M24 50V83" : ""}${state.levels.population >= 3 ? "M50 33V67H76V83" : ""}"/></svg>
-      ${SKILL_IDS.map((skillId) => {
+    <div class="skills-body"><div class="skill-map" tabindex="0" role="group" aria-label="Skill tree. Drag to pan, pinch or scroll to zoom. Arrow keys pan; plus and minus zoom; Home fits the tree.">
+      <canvas class="skill-connections" aria-hidden="true"></canvas>
+      <div class="skill-map-content">${SKILL_IDS.map((skillId) => {
         const info = SKILLS[skillId],
           locked = skillRequirement(skillId, state),
           lvl = state.levels[skillId];
-        return `<button class="skill-node node-${skillId} ${selectedSkill === skillId ? "selected" : ""} ${locked ? "locked" : ""} ${lvl > 0 ? "learned" : ""}" data-skill="${skillId}" aria-label="${info.name}, level ${lvl}${locked ? ", " + locked : ""}" aria-pressed="${selectedSkill === skillId}"><span class="node-icon">${icon(info.icon, 28)}</span><strong>${info.name}</strong><span class="node-level">${locked ? icon("lock", 10) + " " : ""}${lvl} / ${balance.skills[skillId].max}</span>${!locked && lvl < balance.skills[skillId].max && state.money >= skillCost(skillId, lvl, balance) ? '<span class="node-affordable" aria-label="Upgrade available">+</span>' : ""}</button>`;
-      }).join("")}
-    </div><div class="skill-detail"><div class="skill-detail-heading"><span class="detail-icon">${icon(skill.icon, 32)}</span><div><div class="level-tag">LEVEL ${level} / ${balance.skills[id].max}</div><h3>${skill.name}</h3></div></div><div class="effect-comparison"><span>NOW<strong>${skillEffect(id)}</strong></span>${!maxed ? `${icon("arrow", 16)}<span>NEXT<strong>${skillEffect(id, true)}</strong></span>` : '<span class="maxed-label">MAX LEVEL</span>'}</div>${id === "species" && !maxed ? `<div class="next-fish">${item(["fish", "perch", "koi", "trout"][Math.min(3, getStats(state, balance).species)] as "fish")}<span>Next species<strong>${balance.species[Math.min(3, getStats(state, balance).species)].name}</strong></span></div>` : ""}<div class="skill-buy-area">${requirement ? `<p class="purchase-note">${icon("lock", 12)} ${requirement}</p>` : !maxed && !affordable ? `<p class="purchase-note">Need ${money(cost - state.money)} more</p>` : ""}<button class="primary-button purchase-button" data-action="buy-skill" ${!affordable ? "disabled" : ""}>${maxed ? `${icon("check", 18)} Max level` : `${icon("bolt", 18)} Upgrade <strong>${money(cost)}</strong>`}</button></div></div></div>`,
+        const point = TREE_NODES[skillId];
+        const chance = isSpawnSkill(skillId)
+          ? `${getStats(state, balance).spawnRates[SPAWN_SKILLS.indexOf(skillId) + 1]}%`
+          : `${lvl} / ${balance.skills[skillId].max}`;
+        return `<button class="skill-node ${selectedSkill === skillId ? "selected" : ""} ${locked ? "locked" : ""} ${lvl > 0 ? "learned" : ""}" style="left:${point.x}px;top:${point.y}px" data-skill="${skillId}" aria-label="${info.name}, level ${lvl}${isSpawnSkill(skillId) ? `, ${chance} spawn chance` : ""}${locked ? ", " + locked : ""}" aria-pressed="${selectedSkill === skillId}"><span class="node-icon">${visual(skillId, 28)}</span><strong>${info.name}</strong><span class="node-level">${locked ? icon("lock", 10) + " " : ""}${chance}</span>${!locked && !spawnCapReached(skillId, state, balance) && lvl < balance.skills[skillId].max && state.money >= skillCost(skillId, lvl, balance) ? '<span class="node-affordable" aria-label="Upgrade available">+</span>' : ""}</button>`;
+      }).join("")}</div>
+      <div class="tree-controls" role="group" aria-label="Canvas controls"><button class="icon-button" data-tree-control="out" aria-label="Zoom out" title="Zoom out">−</button><button class="icon-button" data-tree-control="fit" aria-label="Fit skill tree" title="Fit skill tree">${icon("radius", 20)}</button><button class="icon-button" data-tree-control="in" aria-label="Zoom in" title="Zoom in">+</button></div>
+    </div><div class="skill-detail"><div class="skill-detail-heading"><span class="detail-icon">${visual(id, 32)}</span><div><div class="level-tag">LVL ${level} / ${balance.skills[id].max}</div><h3>${skill.name}</h3></div></div><div class="effect-comparison"><span>NOW<strong>${skillEffect(id)}</strong></span>${!maxed && !capped ? `${icon("arrow", 16)}<span>NEXT<strong>${skillEffect(id, true)}</strong></span>` : `<span class="maxed-label">${capped ? "80% CAP" : "MAX LEVEL"}</span>`}</div>${isSpawnSkill(id) ? `<div class="spawn-budget" aria-label="Combined advanced fish spawn chance">Shared: ${advancedRate}% / ${SPAWN_CAP}%</div>` : ""}<div class="skill-buy-area">${requirement ? `<p class="purchase-note">${icon("lock", 12)} ${requirement}</p>` : ""}<button class="primary-button purchase-button" data-action="buy-skill" ${!affordable ? "disabled" : ""}>${maxed ? `${icon("check", 18)} Max level` : capped ? "Spawn cap reached" : `${icon("bolt", 18)} Upgrade <strong>${money(cost)}</strong>`}</button></div></div></div>`,
     true,
+  );
+  destroySkillTree = mountSkillTree(
+    $(".skill-map"),
+    treeCamera,
+    (skillId) => !skillRequirement(skillId, state),
+    (camera) => {
+      treeCamera = camera;
+    },
   );
 }
 function openShop(): void {
@@ -304,12 +333,11 @@ function openShop(): void {
 }
 function openJournal(): void {
   const stats = getStats(state, balance);
-  const unlocked = stats.species;
   openDialog(
     "journal",
     `${dialogHeader("", "Field guide", `${state.collection.filter((n) => n > 0).length} / 4 species discovered`)}
     <div class="loadout"><div class="loadout-rod">${item(state.rod ? "goldrod" : "rod")}<span class="eyebrow">EQUIPPED<strong>${state.rod ? "The gilded reed" : "The beginner's rod"}</strong></span></div><div class="loadout-stats"><span>${icon("hook", 16)}<strong>${num(stats.damage)}</strong> damage</span><span>${icon("bolt", 16)}<strong>${(stats.tickMs / 1000).toFixed(2)}s</strong> / tick</span><span>${icon("radius", 16)}<strong>${num(stats.radius)}px</strong> radius</span></div></div>
-    <div class="journal-grid">${balance.species.map((fish, i) => `<article class="fish-entry ${i >= unlocked ? "undiscovered" : ""}"><div class="fish-portrait">${item(["fish", "perch", "koi", "trout"][i] as "fish", "large")}${i >= unlocked ? `<span class="portrait-lock">${icon("lock", 16)}</span>` : ""}</div><h3>${fish.name}</h3><div class="fish-facts"><span>${icon("coin", 14)} ${money(fish.value)}</span><span>${icon("hook", 14)} ${num(fish.hp)} HP</span></div><div class="journal-count">${i >= unlocked ? `Unlock New arrivals level ${i}` : `${num(state.collection[i])} caught so far`}</div></article>`).join("")}</div><div class="journal-summary"><span>ALL-TIME CATCHES<strong>${num(state.caught)}</strong></span><span>TOTAL EARNED<strong>${money(state.earned)}</strong></span><span>FISHING TRIPS<strong>${num(state.trip)}</strong></span></div>`,
+    <div class="journal-grid">${balance.species.map((fish, i) => `<article class="fish-entry ${stats.spawnRates[i] === 0 ? "undiscovered" : ""}"><div class="fish-portrait">${item(["fish", "perch", "koi", "trout"][i] as "fish", "large")}${stats.spawnRates[i] === 0 ? `<span class="portrait-lock">${icon("lock", 16)}</span>` : ""}</div><h3>${fish.name}</h3><div class="fish-facts"><span>${icon("coin", 14)} ${money(fish.value)}</span><span>${icon("hook", 14)} ${num(fish.hp)} HP</span></div><div class="journal-count">${stats.spawnRates[i]}% spawn · ${num(state.collection[i])} caught</div></article>`).join("")}</div><div class="journal-summary"><span>ALL-TIME CATCHES<strong>${num(state.caught)}</strong></span><span>TOTAL EARNED<strong>${money(state.earned)}</strong></span><span>FISHING TRIPS<strong>${num(state.trip)}</strong></span></div>`,
     true,
   );
 }
@@ -336,7 +364,7 @@ const numericField = (
   value: number,
   min = 0,
   step = "any",
-  max = 1000000,
+  max = 10000000,
 ): string =>
   `<label class="editor-field"><span>${label}</span><input type="number" name="${name}" value="${value}" min="${min}" max="${max}" step="${step}" required></label>`;
 function openEditor(): void {
@@ -348,14 +376,14 @@ function openEditor(): void {
     <section class="editor-section"><div class="editor-section-heading"><h3>Room to grow</h3><span>SKILL COSTS & EFFECTS</span></div><div class="editor-skill-table"><div class="editor-table-head"><span>SKILL</span><span>BASE COST $</span><span>COST ×</span><span>FLAT LEVELS</span><span>EFFECT / LVL</span><span>MAX LVL</span></div>${SKILL_IDS.map(
       (id) => {
         const b = balance.skills[id];
-        return `<div class="editor-skill-row"><span><strong>${SKILLS[id].name}</strong><small>${SKILLS[id].unit}</small></span>${numericField(`${SKILLS[id].name} base cost`, `skills.${id}.cost`, b.cost, 1)}${numericField(`${SKILLS[id].name} cost multiplier`, `skills.${id}.growth`, b.growth, 1, "any", 10)}${numericField(`${SKILLS[id].name} flat levels`, `skills.${id}.flatLevels`, b.flatLevels, 0, "1", 100)}${numericField(`${SKILLS[id].name} effect`, `skills.${id}.amount`, b.amount, id === "speed" || id === "species" || id === "population" ? 1 : 0.1, id === "species" || id === "population" ? "1" : "any", id === "speed" ? 75 : id === "species" ? 3 : 100)}${numericField(`${SKILLS[id].name} maximum level`, `skills.${id}.max`, b.max, 1, "1", id === "species" ? 3 : 100)}</div>`;
+        return `<div class="editor-skill-row"><span><strong>${SKILLS[id].name}</strong><small>${SKILLS[id].unit}</small></span>${numericField(`${SKILLS[id].name} base cost`, `skills.${id}.cost`, b.cost, 1)}${numericField(`${SKILLS[id].name} cost multiplier`, `skills.${id}.growth`, b.growth, 1, "any", 10)}${numericField(`${SKILLS[id].name} flat levels`, `skills.${id}.flatLevels`, b.flatLevels, 0, "1", 100)}${numericField(`${SKILLS[id].name} effect`, `skills.${id}.amount`, b.amount, id === "speed" || isSpawnSkill(id) || id === "population" || id === "stamina" ? 1 : 0.1, isSpawnSkill(id) || id === "population" || id === "stamina" ? "1" : "any", id === "speed" ? 75 : isSpawnSkill(id) ? SPAWN_CAP : 100)}${numericField(`${SKILLS[id].name} maximum level`, `skills.${id}.max`, b.max, 1, "1", 100)}</div>`;
       },
     ).join(
       "",
-    )}</div><p class="editor-help">Price = base cost × multiplier<sup>max(0, level − max(0, flat levels − 1))</sup>, rounded up. Quick hands reduces the interval by its percentage each level; the minimum interval is 80ms. Cast radius caps at 220px; population caps at 150.</p></section>
-    <section class="editor-section"><div class="editor-section-heading"><h3>Life in the lake</h3><span>FISH ECONOMY</span></div><div class="editor-fish-grid">${balance.species.map((fish, i) => `<div class="editor-fish"><h4>${fish.name}</h4>${numericField("Health", `species.${i}.hp`, fish.hp, 0.1, "any", 100000)}${numericField("Value ($)", `species.${i}.value`, fish.value, 1)}${numericField("Spawn weight", `species.${i}.weight`, fish.weight, 1, "any", 100)}</div>`).join("")}</div><p class="editor-help">Spawn weights are relative among unlocked species. Every trip guarantees one of your newest species. Existing fish keep their health percentage when health changes.</p></section>
-    <section class="editor-section"><div class="editor-section-heading"><h3>The gilded reed</h3><span>SHOP</span></div><div class="editor-fields two-fields">${numericField("Rod price ($)", "rod.cost", balance.rod.cost, 1, "any", 10000000)}${numericField("Damage multiplier", "rod.multiplier", balance.rod.multiplier, 1, "any", 1000)}</div></section>
-    <section class="editor-section sandbox-section"><div><h3>Playtest shortcuts</h3><p>Only changes this save. Keep your balance settings.</p></div><div class="sandbox-buttons"><button type="button" class="secondary-button" data-action="grant">+$100</button><button type="button" class="secondary-button" data-action="restock">Restock lake</button><button type="button" class="secondary-button danger-text" data-action="reset-save">New save</button></div></section>
+    )}</div><p class="editor-help">Price = base cost × multiplier<sup>max(0, level − max(0, flat levels − 1))</sup>, rounded up to the next $10. Quick hands reduces the interval by its percentage each level; the minimum interval is 80ms. Cast radius caps at 220px; population caps at 150. Stamina caps at 10,000; advanced fish share an 80% cap. Raising spawn effects clamps purchased levels in tree order to stay within that cap.</p></section>
+    <section class="editor-section"><div class="editor-section-heading"><h3>Life in the lake</h3><span>FISH ECONOMY</span></div><div class="editor-fish-grid">${balance.species.map((fish, i) => `<div class="editor-fish"><h4>${fish.name}</h4>${numericField("Health", `species.${i}.hp`, fish.hp, 0.1, "any", 100000)}${numericField("Value ($)", `species.${i}.value`, fish.value, 1)}</div>`).join("")}</div><p class="editor-help">Each species skill adds its percentage to the spawn chance. Advanced fish share an 80% cap; minnows keep the remainder. Existing fish keep their health percentage when health changes.</p></section>
+    <section class="editor-section"><div class="editor-section-heading"><h3>The gilded reed</h3><span>SHOP</span></div><div class="editor-fields two-fields">${numericField("Rod price ($)", "rod.cost", balance.rod.cost, 1, "any", 100000000)}${numericField("Damage multiplier", "rod.multiplier", balance.rod.multiplier, 1, "any", 1000)}</div></section>
+    <section class="editor-section sandbox-section"><div><h3>Playtest shortcuts</h3><p>Only changes this save. Keep your balance settings.</p></div><div class="sandbox-buttons"><button type="button" class="secondary-button" data-action="grant">+$1,000</button><button type="button" class="secondary-button" data-action="restock">Restock lake</button><button type="button" class="secondary-button danger-text" data-action="reset-save">New save</button></div></section>
     </div><div class="editor-bottom"><div id="editor-message" role="status">${icon("edit", 14)} Your game is paused while you edit.</div><div class="editor-buttons"><button type="button" class="text-button" data-action="default-balance">Restore defaults</button><button type="button" class="secondary-button" data-action="import-balance">Import</button><button type="button" class="secondary-button" data-action="export-balance">Export JSON</button><button type="submit" class="primary-button">${icon("check", 17)} Apply changes</button></div></div></form><input id="balance-file" type="file" accept=".json,application/json" hidden>`,
     true,
   );
@@ -490,10 +518,10 @@ document.addEventListener("click", (e) => {
       break;
     case "grant":
       if (devMode) {
-        state.money += 100;
+        state.money += 1000;
         save();
         updateUI();
-        editorMessage(`Added $100. Pocket: ${money(state.money)}.`);
+        editorMessage(`Added $1,000. Pocket: ${money(state.money)}.`);
       }
       break;
     case "restock":

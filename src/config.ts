@@ -3,9 +3,18 @@ export const SKILL_IDS = [
   "damage",
   "speed",
   "radius",
-  "species",
+  "stamina",
+  "perch",
+  "koi",
+  "trout",
 ] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
+export const SPAWN_SKILLS = ["perch", "koi", "trout"] as const;
+export type SpawnSkillId = (typeof SPAWN_SKILLS)[number];
+export const SPAWN_CAP = 80;
+export function isSpawnSkill(id: SkillId): id is SpawnSkillId {
+  return SPAWN_SKILLS.some((spawnId) => spawnId === id);
+}
 export interface SkillBalance {
   cost: number;
   growth: number;
@@ -17,7 +26,6 @@ export interface Species {
   name: string;
   hp: number;
   value: number;
-  weight: number;
   sprite: number;
   color: string;
 }
@@ -36,47 +44,46 @@ export interface Balance {
 export const DEFAULT_BALANCE: Balance = {
   base: { population: 3, stamina: 10, damage: 1, tickMs: 2000, radius: 34 },
   skills: {
-    population: { cost: 1, growth: 1.28, flatLevels: 3, amount: 1, max: 40 },
-    damage: { cost: 4, growth: 1.5, flatLevels: 0, amount: 1, max: 30 },
-    speed: { cost: 5, growth: 1.65, flatLevels: 0, amount: 12, max: 12 },
-    radius: { cost: 6, growth: 1.55, flatLevels: 0, amount: 8, max: 15 },
-    species: { cost: 12, growth: 3, flatLevels: 0, amount: 1, max: 3 },
+    population: { cost: 10, growth: 1.28, flatLevels: 3, amount: 1, max: 40 },
+    damage: { cost: 40, growth: 1.5, flatLevels: 0, amount: 1, max: 30 },
+    speed: { cost: 50, growth: 1.65, flatLevels: 0, amount: 12, max: 12 },
+    radius: { cost: 60, growth: 1.55, flatLevels: 0, amount: 8, max: 15 },
+    stamina: { cost: 10, growth: 1.28, flatLevels: 3, amount: 1, max: 40 },
+    perch: { cost: 120, growth: 1.28, flatLevels: 0, amount: 5, max: 16 },
+    koi: { cost: 360, growth: 1.28, flatLevels: 0, amount: 5, max: 16 },
+    trout: { cost: 1080, growth: 1.28, flatLevels: 0, amount: 5, max: 16 },
   },
   species: [
     {
       name: "Silver minnow",
       hp: 4,
-      value: 1,
-      weight: 65,
+      value: 10,
       sprite: 1,
       color: "#accdd1",
     },
     {
       name: "Sunset perch",
       hp: 8,
-      value: 3,
-      weight: 30,
+      value: 30,
       sprite: 2,
       color: "#e9bd73",
     },
     {
       name: "Rosefin koi",
       hp: 16,
-      value: 9,
-      weight: 20,
+      value: 90,
       sprite: 4,
       color: "#e8a294",
     },
     {
       name: "Golden trout",
       hp: 30,
-      value: 20,
-      weight: 12,
+      value: 200,
       sprite: 3,
       color: "#ddcc79",
     },
   ],
-  rod: { cost: 1000, multiplier: 5 },
+  rod: { cost: 10000, multiplier: 5 },
 };
 export const SKILLS: Record<
   SkillId,
@@ -120,13 +127,35 @@ export const SKILLS: Record<
     icon: "radius",
     unit: "radius px per level",
   },
-  species: {
-    name: "New arrivals",
-    subtitle: "Something worth waiting for",
+  stamina: {
+    name: "More stamina",
+    subtitle: "",
+    description: "Increase stamina by 1 per level.",
+    icon: "bolt",
+    unit: "stamina per level",
+  },
+  perch: {
+    name: "Sunset perch",
+    subtitle: "",
     description:
-      "Make the lake a home for rarer fish. They take more work to catch, but bring a much better payday.",
-    icon: "sparkles",
-    unit: "species per level",
+      "Increase perch spawn chance by 5 percentage points per level.",
+    icon: "fish",
+    unit: "% spawn chance per level",
+  },
+  koi: {
+    name: "Rosefin koi",
+    subtitle: "",
+    description: "Increase koi spawn chance by 5 percentage points per level.",
+    icon: "fish",
+    unit: "% spawn chance per level",
+  },
+  trout: {
+    name: "Golden trout",
+    subtitle: "",
+    description:
+      "Increase trout spawn chance by 5 percentage points per level.",
+    icon: "fish",
+    unit: "% spawn chance per level",
   },
 };
 export function freshBalance(): Balance {
@@ -184,11 +213,24 @@ export function validateBalance(input: unknown): Balance {
     radius: number(input.base.radius, 10, 200, "Cursor radius"),
   };
   const skills = {} as Balance["skills"];
+  const legacy = object(input.skills.species) && !("perch" in input.skills);
+  const legacySpecies = legacy
+    ? (input.skills.species as Record<string, unknown>)
+    : null;
   for (const id of SKILL_IDS) {
-    const skill = input.skills[id];
+    const skill =
+      legacy && (id === "stamina" || isSpawnSkill(id))
+        ? DEFAULT_BALANCE.skills[id]
+        : input.skills[id];
     if (!object(skill)) throw new Error(`Missing ${id} settings.`);
     skills[id] = {
-      cost: number(skill.cost, 1, 1000000, `${SKILLS[id].name} cost`),
+      cost:
+        number(
+          skill.cost,
+          1,
+          legacy ? 1000000 : 10000000,
+          `${SKILLS[id].name} cost`,
+        ) * (legacy && id !== "stamina" && !isSpawnSkill(id) ? 10 : 1),
       growth: number(skill.growth, 1, 10, `${SKILLS[id].name} cost growth`),
       flatLevels: number(
         skill.flatLevels,
@@ -200,26 +242,34 @@ export function validateBalance(input: unknown): Balance {
       amount: number(
         skill.amount,
         id === "speed" ? 1 : 0.1,
-        id === "speed" ? 75 : id === "species" ? 3 : 100,
+        id === "speed" ? 75 : isSpawnSkill(id) ? SPAWN_CAP : 100,
         `${SKILLS[id].name} effect`,
-        id === "species" || id === "population",
+        isSpawnSkill(id) || id === "population" || id === "stamina",
       ),
-      max: number(
-        skill.max,
-        1,
-        id === "species" ? 3 : 100,
-        `${SKILLS[id].name} maximum`,
-        true,
-      ),
+      max: number(skill.max, 1, 100, `${SKILLS[id].name} maximum`, true),
     };
+    if (legacySpecies && isSpawnSkill(id)) {
+      const cost = number(legacySpecies.cost, 1, 1000000, "New arrivals cost");
+      const growth = number(
+        legacySpecies.growth,
+        1,
+        10,
+        "New arrivals cost growth",
+      );
+      skills[id].cost = Math.min(
+        10000000,
+        Math.ceil(cost * growth ** SPAWN_SKILLS.indexOf(id)) * 10,
+      );
+    }
   }
   const species = input.species.map((fish, i) => {
     if (!object(fish)) throw new Error(`Missing fish ${i + 1}.`);
     return {
       ...DEFAULT_BALANCE.species[i],
       hp: number(fish.hp, 0.1, 100000, "Fish health"),
-      value: number(fish.value, 1, 1000000, "Fish value"),
-      weight: number(fish.weight, 1, 100, "Fish spawn weight"),
+      value:
+        number(fish.value, 1, legacy ? 1000000 : 10000000, "Fish value") *
+        (legacy ? 10 : 1),
     };
   });
   return {
@@ -227,7 +277,9 @@ export function validateBalance(input: unknown): Balance {
     skills,
     species,
     rod: {
-      cost: number(input.rod.cost, 1, 10000000, "Rod price"),
+      cost:
+        number(input.rod.cost, 1, legacy ? 10000000 : 100000000, "Rod price") *
+        (legacy ? 10 : 1),
       multiplier: number(input.rod.multiplier, 1, 1000, "Rod multiplier"),
     },
   };
