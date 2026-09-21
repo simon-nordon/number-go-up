@@ -22,13 +22,19 @@ export interface Species {
   color: string;
 }
 export interface Balance {
-  base: { population: number; damage: number; tickMs: number; radius: number };
+  base: {
+    population: number;
+    stamina: number;
+    damage: number;
+    tickMs: number;
+    radius: number;
+  };
   skills: Record<SkillId, SkillBalance>;
   species: Species[];
   rod: { cost: number; multiplier: number };
 }
 export const DEFAULT_BALANCE: Balance = {
-  base: { population: 3, damage: 1, tickMs: 650, radius: 34 },
+  base: { population: 3, stamina: 10, damage: 1, tickMs: 2000, radius: 34 },
   skills: {
     population: { cost: 1, growth: 1.28, flatLevels: 3, amount: 1, max: 40 },
     damage: { cost: 4, growth: 1.5, flatLevels: 0, amount: 1, max: 30 },
@@ -86,7 +92,7 @@ export const SKILLS: Record<
     name: "Pond life",
     subtitle: "A livelier little lake",
     description:
-      "A little feed goes a long way. Invite more fish to the lake at the start of every trip.",
+      "Invite more fish into each school. A wider school rewards a well-placed cast.",
     icon: "fish",
     unit: "fish per level",
   },
@@ -163,6 +169,16 @@ export function validateBalance(input: unknown): Balance {
     );
   const base = {
     population: number(input.base.population, 1, 100, "Starting fish", true),
+    // Older balance exports predate stamina; keep their other custom settings.
+    stamina: number(
+      "stamina" in input.base
+        ? input.base.stamina
+        : DEFAULT_BALANCE.base.stamina,
+      1,
+      10000,
+      "Starting stamina",
+      true,
+    ),
     damage: number(input.base.damage, 0.1, 10000, "Base damage"),
     tickMs: number(input.base.tickMs, 80, 10000, "Tick interval"),
     radius: number(input.base.radius, 10, 200, "Cursor radius"),

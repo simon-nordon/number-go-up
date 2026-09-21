@@ -16,16 +16,18 @@ export interface Fish {
   phase: number;
   hp: number;
   maxHp: number;
-  tick: number;
 }
 export interface GameState {
-  version: 2;
+  version: 3;
   money: number;
   earned: number;
   caught: number;
   trip: number;
   tripCaught: number;
   tripTotal: number;
+  stamina: number;
+  maxStamina: number;
+  castTick: number;
   levels: Record<SkillId, number>;
   rod: boolean;
   fish: Fish[];
@@ -124,7 +126,8 @@ export function purchaseRod(state: GameState, balance: Balance): boolean {
   state.rod = true;
   return true;
 }
-export function spawnTrip(
+/** Refill an empty pond without starting a new trip or restoring stamina. */
+function refillPond(
   state: GameState,
   balance: Balance,
   random = Math.random,
@@ -161,32 +164,45 @@ export function spawnTrip(
     if (position[0] < 480 && position[1] < 280)
       position[1] = 280 + random() * 130;
     return {
-      id: state.trip * 1000 + i,
+      id: state.trip * 1000 + state.tripTotal + i,
       species,
       x: position[0],
       y: position[1],
       phase: random() * Math.PI * 2,
       hp: fish.hp,
       maxHp: fish.hp,
-      tick: 0,
     };
   });
-  state.tripTotal = stats.population;
+  state.tripTotal += stats.population;
+}
+export function spawnTrip(
+  state: GameState,
+  balance: Balance,
+  random = Math.random,
+): void {
+  state.tripTotal = 0;
   state.tripCaught = 0;
+  state.stamina = balance.base.stamina;
+  state.maxStamina = balance.base.stamina;
+  state.castTick = 0;
   state.restockReady = false;
+  refillPond(state, balance, random);
 }
 export function newGame(
   balance: Balance = DEFAULT_BALANCE,
   random = Math.random,
 ): GameState {
   const state: GameState = {
-    version: 2,
+    version: 3,
     money: 0,
     earned: 0,
     caught: 0,
     trip: 1,
     tripCaught: 0,
     tripTotal: balance.base.population,
+    stamina: balance.base.stamina,
+    maxStamina: balance.base.stamina,
+    castTick: 0,
     levels: { population: 0, damage: 0, speed: 0, radius: 0, species: 0 },
     rod: false,
     fish: [],
@@ -202,6 +218,7 @@ export function newGame(
 export function enterCamp(state: GameState): void {
   state.inCamp = true;
   state.restockReady = true;
+  state.castTick = 0;
 }
 export function enterLake(
   state: GameState,
@@ -223,28 +240,39 @@ export function fishPosition(
     y: fish.y + Math.sin(time * 0.42 + fish.phase) * 9,
   };
 }
-/** Time-based independent hover ticks; no clicking and no damage away from the dock. */
+/** One shared cast tick damages every target and spends exactly one stamina. */
 export function tickFishing(
   state: GameState,
   balance: Balance,
   dt: number,
   pointer: { x: number; y: number } | null,
+  random = Math.random,
 ): GameEvent[] {
   const events: GameEvent[] = [];
   const stats = getStats(state, balance);
-  const fishing = !state.inCamp && atFishingSpot(state.player) && pointer;
-  for (const fish of state.fish) {
-    const pos = fishPosition(fish, state.playedSeconds);
-    if (
-      !fishing ||
-      Math.hypot(pos.x - pointer.x, pos.y - pointer.y) > stats.radius + 12
-    ) {
-      fish.tick = 0;
-      continue;
-    }
-    fish.tick += dt * 1000;
-    while (fish.tick + 0.0001 >= stats.tickMs && fish.hp > 0) {
-      fish.tick -= stats.tickMs;
+  if (!Number.isFinite(dt) || dt < 0) return events;
+  const targets =
+    !state.inCamp && atFishingSpot(state.player) && pointer && state.stamina > 0
+      ? state.fish.filter((fish) => {
+          const pos = fishPosition(fish, state.playedSeconds);
+          return (
+            Math.hypot(pos.x - pointer.x, pos.y - pointer.y) <=
+            stats.radius + 12
+          );
+        })
+      : [];
+  if (!targets.length) {
+    state.castTick = 0;
+    return events;
+  }
+  state.castTick += dt * 1000;
+  while (state.castTick + 0.0001 >= stats.tickMs && state.stamina > 0) {
+    const living = targets.filter((fish) => fish.hp > 0);
+    if (!living.length) break;
+    state.castTick = Math.max(0, state.castTick - stats.tickMs);
+    state.stamina--;
+    for (const fish of living) {
+      const pos = fishPosition(fish, state.playedSeconds);
       fish.hp = Math.max(0, fish.hp - stats.damage);
       events.push({
         type: "hit",
@@ -269,6 +297,10 @@ export function tickFishing(
     }
   }
   state.fish = state.fish.filter((fish) => fish.hp > 0);
+  if (state.stamina === 0 || targets.every((fish) => fish.hp === 0))
+    state.castTick = 0;
+  if (!state.fish.length && state.stamina > 0)
+    refillPond(state, balance, random);
   return events;
 }
 export function reconcileBalance(state: GameState, balance: Balance): void {
@@ -278,8 +310,8 @@ export function reconcileBalance(state: GameState, balance: Balance): void {
     const fraction = fish.hp / fish.maxHp;
     fish.maxHp = balance.species[fish.species].hp;
     fish.hp = Math.max(0.01, fraction * fish.maxHp);
-    fish.tick = 0;
   }
+  state.castTick = Math.min(state.castTick, getStats(state, balance).tickMs);
 }
 const finite = (n: unknown, min: number, max: number): n is number =>
   typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
@@ -295,7 +327,7 @@ export function parseSave(
     };
     if (
       !s ||
-      (s.version !== 1 && s.version !== 2) ||
+      (s.version !== 1 && s.version !== 2 && s.version !== 3) ||
       !s.levels ||
       !s.player ||
       typeof s.rod !== "boolean" ||
@@ -303,6 +335,16 @@ export function parseSave(
       typeof s.restockReady !== "boolean"
     )
       return null;
+    if (s.version === 3) {
+      if (
+        !finite(s.maxStamina, 1, 10000) ||
+        !Number.isInteger(s.maxStamina) ||
+        !finite(s.stamina, 0, s.maxStamina) ||
+        !Number.isInteger(s.stamina) ||
+        !finite(s.castTick, 0, 10000)
+      )
+        return null;
+    }
     for (const field of [
       "money",
       "earned",
@@ -316,7 +358,11 @@ export function parseSave(
       !Number.isInteger(s.tripCaught) ||
       !finite(s.trip, 1, 1e9) ||
       !Number.isInteger(s.trip) ||
-      !finite(s.tripTotal, 1, 150) ||
+      !finite(
+        s.tripTotal,
+        1,
+        s.version === 3 ? (s.maxStamina + 1) * 150 : 150,
+      ) ||
       !Number.isInteger(s.tripTotal)
     )
       return null;
@@ -362,8 +408,7 @@ export function parseSave(
         !finite(f.y, legacy ? 160 : 180, legacy ? 610 : 430) ||
         !finite(f.phase, 0, Math.PI * 2) ||
         !finite(f.hp, 0.0001, 100000) ||
-        !finite(f.maxHp, f.hp, 100000) ||
-        !finite(f.tick, 0, 10000)
+        !finite(f.maxHp, f.hp, 100000)
       )
         return null;
       ids.add(f.id);
@@ -378,8 +423,26 @@ export function parseSave(
         if (fish.x < 480) fish.y = Math.max(280, fish.y);
       }
     }
-    const state: GameState = { ...s, version: 2 };
+    const state: GameState = {
+      ...s,
+      version: 3,
+      stamina: s.version === 3 ? s.stamina : balance.base.stamina,
+      maxStamina: s.version === 3 ? s.maxStamina : balance.base.stamina,
+      castTick: s.version === 3 ? s.castTick : 0,
+      // Drop the old independent fish timers when migrating to shared casts.
+      fish: s.fish.map(({ id, species, x, y, phase, hp, maxHp }) => ({
+        id,
+        species,
+        x,
+        y,
+        phase,
+        hp,
+        maxHp,
+      })),
+    };
     reconcileBalance(state, balance);
+    if (!state.inCamp && !state.fish.length && state.stamina > 0)
+      refillPond(state, balance);
     return state;
   } catch {
     return null;

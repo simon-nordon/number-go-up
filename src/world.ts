@@ -761,6 +761,7 @@ export class World {
         !!pointer &&
         !this.paused &&
         !this.state.inCamp &&
+        this.state.stamina > 0 &&
         atFishingSpot(this.state.player) &&
         Math.hypot(pos.x - pointer.x, pos.y - pointer.y) <= stats.radius + 12;
       if (active) this.hoveredFish = fish.id;
@@ -847,6 +848,7 @@ export class World {
       inPond(pointer) &&
       !this.state.inCamp &&
       !this.paused &&
+      this.state.stamina > 0 &&
       atFishingSpot(this.state.player)
     ) {
       c.lineWidth = 1.5;
@@ -874,7 +876,7 @@ export class World {
           pointer.y,
           stats.radius + 4,
           -Math.PI / 2,
-          -Math.PI / 2 + (Math.PI * 2 * target.tick) / stats.tickMs,
+          -Math.PI / 2 + (Math.PI * 2 * this.state.castTick) / stats.tickMs,
         );
         c.stroke();
       }

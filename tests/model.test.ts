@@ -17,86 +17,185 @@ import {
   tickFishing,
 } from "../src/model.ts";
 
-test("the opening loop earns $3, buys three $1 population levels, then spawns six fish", () => {
+test("the opening trip stops at 10 stamina before all 12 health is caught", () => {
   const balance = freshBalance(),
     state = newGame(balance, () => 0.5);
-  assert.equal(state.money, 0);
-  assert.equal(state.fish.length, 3);
-  for (const fish of [...state.fish]) {
-    const events = tickFishing(state, balance, 2.6, fishPosition(fish, 0));
-    assert.equal(events.filter((e) => e.type === "hit").length, 4);
-    assert.equal(events.filter((e) => e.type === "catch").length, 1);
-  }
-  assert.equal(state.money, 3);
-  assert.equal(state.caught, 3);
-  assert.equal(state.fish.length, 0);
+  assert.equal(getStats(state, balance).tickMs, 2000);
+  assert.equal(state.stamina, 10);
+  assert.equal(state.maxStamina, 10);
+  assert.equal(
+    state.fish.reduce((sum, f) => sum + f.hp, 0),
+    12,
+  );
+  const firstFish = [...state.fish];
+  for (const fish of firstFish)
+    tickFishing(state, balance, 8, fishPosition(fish, 0));
+  assert.equal(state.stamina, 0);
+  assert.equal(state.money, 2);
+  assert.equal(state.caught, 2);
+  assert.equal(state.fish.length, 1);
+  assert.equal(state.fish[0].hp, 2);
+  assert.deepEqual(
+    tickFishing(state, balance, 100, fishPosition(state.fish[0], 0)),
+    [],
+  );
+  assert.equal(
+    state.fish[0].hp,
+    2,
+    "exhausted casts cannot damage the last fish",
+  );
   assert.equal(
     purchaseSkill(state, "population", balance),
     false,
     "must be at camp",
   );
   enterCamp(state);
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     assert.equal(skillCost("population", i, balance), 1);
     assert.equal(purchaseSkill(state, "population", balance), true);
   }
-  assert.equal(state.money, 0);
-  assert.equal(state.levels.population, 3);
   enterLake(state, balance, () => 0.5);
-  assert.equal(state.fish.length, 6);
+  assert.equal(state.fish.length, 5);
   assert.equal(state.trip, 2);
   assert.equal(state.tripCaught, 0);
+  assert.equal(state.stamina, 10);
+  assert.equal(state.castTick, 0);
 });
 
-test("damage is time-based, pauses off a fish, and requires standing at the dock", () => {
+test("damage waits two seconds and idle, missed and off-dock casts cost no stamina", () => {
   const balance = freshBalance(),
-    state = newGame(balance, () => 0.5),
-    fish = state.fish[0],
+    state = newGame(balance, () => 0.5);
+  const fish = state.fish[0],
     pointer = fishPosition(fish, 0);
-  tickFishing(state, balance, 0.4, pointer);
+  tickFishing(state, balance, 1.99, pointer);
   assert.equal(fish.hp, 4);
-  tickFishing(state, balance, 0.25, pointer);
+  assert.equal(state.stamina, 10);
+  tickFishing(state, balance, 0.01, pointer);
   assert.equal(fish.hp, 3);
-  tickFishing(state, balance, 0.5, pointer);
-  tickFishing(state, balance, 1, null);
-  tickFishing(state, balance, 0.15, pointer);
-  assert.equal(fish.hp, 3, "leaving resets that fish’s tick timer");
+  assert.equal(state.stamina, 9);
+  tickFishing(state, balance, 1, pointer);
+  tickFishing(state, balance, 30, null);
+  assert.equal(state.castTick, 0);
+  tickFishing(state, balance, 1, pointer);
+  assert.equal(fish.hp, 3, "leaving the fish resets the shared cast timer");
+  tickFishing(state, balance, 30, { x: 0, y: 0 });
   enterCamp(state);
   tickFishing(state, balance, 30, pointer);
-  assert.equal(fish.hp, 3);
   state.inCamp = false;
   state.player.y = 650;
   tickFishing(state, balance, 30, pointer);
   assert.equal(fish.hp, 3);
+  assert.equal(state.stamina, 9);
 });
 
-test("a wide cursor damages multiple fish and each catch pays exactly once", () => {
+test("one shared tick damages every fish for one stamina, including newly entered targets", () => {
   const balance = freshBalance(),
     state = newGame(balance, () => 0.5);
-  state.fish.forEach((f) => {
-    f.x = 700;
-    f.y = 300;
-    f.phase = 0;
-  });
-  const events = tickFishing(state, balance, 100, { x: 700, y: 300 });
-  assert.equal(events.filter((e) => e.type === "catch").length, 3);
-  assert.equal(state.money, 3);
-  assert.deepEqual(state.collection, [3, 0, 0, 0]);
-  tickFishing(state, balance, 100, { x: 700, y: 300 });
-  assert.equal(state.money, 3);
+  const [first, second] = state.fish;
+  Object.assign(first, { x: 700, y: 300, phase: 0 });
+  Object.assign(second, { x: 900, y: 300, phase: 0 });
+  tickFishing(state, balance, 1.9, { x: 700, y: 300 });
+  second.x = 700;
+  const events = tickFishing(state, balance, 0.1, { x: 700, y: 300 });
+  assert.equal(events.filter((e) => e.type === "hit").length, 2);
+  assert.equal(first.hp, 3);
+  assert.equal(second.hp, 3);
+  assert.equal(state.stamina, 9);
+  first.x = 900;
+  tickFishing(state, balance, 2, { x: 700, y: 300 });
+  assert.equal(first.hp, 3);
+  assert.equal(second.hp, 2);
+  assert.equal(state.stamina, 8);
 });
 
-test("visiting camp restocks once, and staying on the lake does not respawn fish", () => {
+test("clearing a school pays each catch once and refills without restoring stamina", () => {
+  const balance = freshBalance(),
+    state = newGame(balance, () => 0.5);
+  state.fish.forEach((f) => Object.assign(f, { x: 700, y: 300, phase: 0 }));
+  const oldIds = state.fish.map((f) => f.id);
+  const events = tickFishing(state, balance, 8, { x: 700, y: 300 }, () => 0.5);
+  assert.equal(events.filter((e) => e.type === "hit").length, 12);
+  assert.equal(events.filter((e) => e.type === "catch").length, 3);
+  assert.equal(
+    state.stamina,
+    6,
+    "twelve hits across four shared ticks cost four stamina",
+  );
+  assert.equal(state.money, 3);
+  assert.deepEqual(state.collection, [3, 0, 0, 0]);
+  assert.equal(state.trip, 1);
+  assert.equal(state.tripCaught, 3);
+  assert.equal(state.tripTotal, 6);
+  assert.equal(state.fish.length, 3);
+  assert.ok(state.fish.every((f) => f.hp === 4 && !oldIds.includes(f.id)));
+  tickFishing(state, balance, 100, { x: 700, y: 300 });
+  assert.equal(state.money, 3);
+  assert.equal(
+    state.stamina,
+    6,
+    "an empty cast after the refill spends nothing",
+  );
+  assert.deepEqual(parseSave(JSON.stringify(state), balance), state);
+});
+
+test("large time steps cannot overspend stamina or skip damage on the final shared tick", () => {
   const balance = freshBalance(),
     state = newGame(balance);
+  state.fish.forEach((f) =>
+    Object.assign(f, { x: 700, y: 300, phase: 0, hp: 100, maxHp: 100 }),
+  );
+  const events = tickFishing(state, balance, 1000, { x: 700, y: 300 });
+  assert.equal(state.stamina, 0);
+  assert.equal(state.castTick, 0);
+  assert.equal(events.length, 30);
+  assert.ok(state.fish.every((f) => f.hp === 90));
+  assert.deepEqual(tickFishing(state, balance, 1000, { x: 700, y: 300 }), []);
+});
+
+test("a final stamina tick pays all simultaneous catches and does not refill the pond", () => {
+  const balance = freshBalance(),
+    state = newGame(balance);
+  state.stamina = 1;
+  state.fish.forEach((f) =>
+    Object.assign(f, { x: 700, y: 300, phase: 0, hp: 1 }),
+  );
+  const events = tickFishing(state, balance, 20, { x: 700, y: 300 });
+  assert.equal(events.filter((e) => e.type === "catch").length, 3);
+  assert.equal(state.stamina, 0);
+  assert.equal(state.money, 3);
+  assert.equal(state.fish.length, 0);
+  assert.equal(state.trip, 1);
+  assert.equal(state.tripCaught, 3);
+  assert.deepEqual(parseSave(JSON.stringify(state), balance), state);
+});
+
+test("shared stamina and damage agree across different frame sizes", () => {
+  const balance = freshBalance();
+  const batch = newGame(balance, () => 0.5);
+  batch.fish.forEach((f) =>
+    Object.assign(f, { x: 700, y: 300, phase: 0, hp: 100, maxHp: 100 }),
+  );
+  const frames = structuredClone(batch);
+  tickFishing(batch, balance, 7.25, { x: 700, y: 300 });
+  for (let i = 0; i < 145; i++)
+    tickFishing(frames, balance, 0.05, { x: 700, y: 300 });
+  assert.deepEqual(frames, batch);
+});
+
+test("visiting camp refills stamina once, while re-entering the active pond preserves it", () => {
+  const balance = freshBalance(),
+    state = newGame(balance);
+  state.stamina = 3;
   const ids = state.fish.map((f) => f.id);
   enterLake(state, balance);
   assert.deepEqual(
     state.fish.map((f) => f.id),
     ids,
   );
+  assert.equal(state.stamina, 3);
   enterCamp(state);
   enterLake(state, balance);
+  assert.equal(state.stamina, 10);
   assert.equal(state.trip, 2);
   assert.notDeepEqual(
     state.fish.map((f) => f.id),
@@ -138,7 +237,7 @@ test("each type of upgrade changes its intended stat and rare fish are guarantee
   const stats = getStats(state, balance);
   assert.equal(stats.population, 6);
   assert.equal(stats.damage, 2);
-  assert.equal(stats.tickMs, 572);
+  assert.equal(stats.tickMs, 1760);
   assert.equal(stats.radius, 42);
   assert.equal(stats.species, 2);
   spawnTrip(state, balance, () => 0);
@@ -183,7 +282,7 @@ test("live balance changes preserve damage percentage and clamp skill levels", (
 test("saves round-trip partial trips, money, levels and camp position", () => {
   const balance = freshBalance(),
     state = newGame(balance, () => 0.5);
-  tickFishing(state, balance, 2.6, fishPosition(state.fish[0], 0));
+  tickFishing(state, balance, 8, fishPosition(state.fish[0], 0));
   state.fish[0].hp = 3;
   enterCamp(state);
   state.player = { x: STATIONS.tree.targetX, y: STATIONS.tree.targetY };
@@ -218,7 +317,7 @@ test("invalid saves and balance files fail safely", () => {
   const invalid = freshBalance();
   invalid.base.tickMs = 0;
   assert.throws(() => validateBalance(invalid), /Tick interval/);
-  invalid.base.tickMs = 650;
+  invalid.base.tickMs = balance.base.tickMs;
   invalid.skills.speed.amount = 100;
   assert.throws(() => validateBalance(invalid), /effect/);
   invalid.skills.speed.amount = NaN;
@@ -280,7 +379,7 @@ test("legacy horizontal saves migrate without losing purchases or the partial tr
     };
     const migrated = parseSave(JSON.stringify(legacy), balance)!;
     assert.ok(migrated);
-    assert.equal(migrated.version, 2);
+    assert.equal(migrated.version, 3);
     assert.deepEqual(migrated.player, inCamp ? CAMP_START : LAKE_START);
     assert.equal(migrated.money, original.money);
     assert.deepEqual(migrated.levels, original.levels);
@@ -307,4 +406,117 @@ test("vertical saves reject the water and buildings but preserve travel along th
     );
   state.player = { x: 640, y: 650 };
   assert.deepEqual(parseSave(JSON.stringify(state), balance), state);
+});
+
+test("partial stamina and the shared timer survive reloads without a refill", () => {
+  const balance = freshBalance(),
+    state = newGame(balance, () => 0.5);
+  tickFishing(state, balance, 2.5, fishPosition(state.fish[0], 0));
+  assert.equal(state.stamina, 9);
+  assert.equal(state.castTick, 500);
+  const restored = parseSave(JSON.stringify(state), balance)!;
+  assert.deepEqual(restored, state);
+  tickFishing(restored, balance, 1.5, fishPosition(restored.fish[0], 0));
+  assert.equal(restored.stamina, 8);
+  assert.equal(restored.fish[0].hp, 2);
+  restored.stamina = 0;
+  assert.equal(parseSave(JSON.stringify(restored), balance)?.stamina, 0);
+});
+
+test("legacy vertical saves gain stamina without losing an injured fish or purchases", () => {
+  const balance = freshBalance(),
+    state = newGame(balance, () => 0.5);
+  state.money = 47;
+  state.levels.population = 2;
+  state.fish[0].hp = 2;
+  const { stamina, maxStamina, castTick, ...old } = state;
+  const legacy = {
+    ...old,
+    version: 2,
+    fish: old.fish.map((f) => ({ ...f, tick: 400 })),
+  };
+  const restored = parseSave(JSON.stringify(legacy), balance)!;
+  assert.ok(restored);
+  assert.equal(restored.version, 3);
+  assert.equal(restored.stamina, 10);
+  assert.equal(restored.maxStamina, 10);
+  assert.equal(restored.castTick, 0);
+  assert.equal(restored.money, 47);
+  assert.equal(restored.levels.population, 2);
+  assert.deepEqual(restored.fish, state.fish);
+});
+
+test("an old cleared pond continues with full stamina in the same trip", () => {
+  const balance = freshBalance(),
+    state = newGame(balance);
+  const legacy = {
+    ...state,
+    version: 2,
+    fish: [],
+    tripCaught: 3,
+    caught: 3,
+    money: 3,
+    earned: 3,
+    collection: [3, 0, 0, 0],
+  };
+  const restored = parseSave(JSON.stringify(legacy), balance)!;
+  assert.ok(restored);
+  assert.equal(restored.stamina, 10);
+  assert.equal(restored.trip, 1);
+  assert.equal(restored.tripCaught, 3);
+  assert.equal(restored.tripTotal, 6);
+  assert.equal(restored.fish.length, 3);
+  assert.equal(restored.money, 3);
+});
+
+test("invalid stamina saves and tuning are rejected, while old balance exports still import", () => {
+  const balance = freshBalance(),
+    state = newGame(balance);
+  for (const invalid of [
+    { stamina: -1 },
+    { stamina: 11 },
+    { stamina: 1.5 },
+    { stamina: null },
+    { maxStamina: 0 },
+    { maxStamina: 2.5 },
+    { maxStamina: 10001 },
+    { castTick: -1 },
+    { castTick: null },
+    { castTick: 10001 },
+  ])
+    assert.equal(
+      parseSave(JSON.stringify({ ...state, ...invalid }), balance),
+      null,
+    );
+  for (const stamina of [-1, 0, 1.5, 10001, NaN, null])
+    assert.throws(
+      () => validateBalance({ ...balance, base: { ...balance.base, stamina } }),
+      /Starting stamina/,
+    );
+  const { stamina, ...oldBase } = balance.base;
+  const restored = validateBalance({
+    ...balance,
+    base: { ...oldBase, tickMs: 1200 },
+  });
+  assert.equal(restored.base.stamina, 10);
+  assert.equal(
+    restored.base.tickMs,
+    1200,
+    "explicit balance overrides remain intact",
+  );
+});
+
+test("live stamina tuning applies next trip and never refills an exhausted round", () => {
+  const balance = freshBalance(),
+    state = newGame(balance);
+  state.stamina = 0;
+  balance.base.stamina = 20;
+  reconcileBalance(state, balance);
+  assert.equal(state.stamina, 0);
+  assert.equal(state.maxStamina, 10);
+  assert.equal(parseSave(JSON.stringify(state), balance)?.stamina, 0);
+  enterCamp(state);
+  enterLake(state, balance);
+  assert.equal(state.stamina, 20);
+  assert.equal(state.maxStamina, 20);
 });

@@ -63,6 +63,7 @@ let selectedSkill: SkillId = "population";
 let toastTimer = 0;
 let lastZone = state.inCamp;
 let lastTotal = state.caught;
+let lastStamina = state.stamina;
 let uiSignature = "";
 let returnFocus: HTMLElement | null = null;
 const money = (n: number): string =>
@@ -85,13 +86,13 @@ app.innerHTML = `
         <div class="wallet" aria-label="Wallet"><span class="coin-dot" aria-hidden="true">${icon("coin", 24)}</span><strong id="money" aria-live="polite">$0</strong></div>
         <div class="header-actions"><button class="icon-button" data-action="journal" aria-label="Open field guide" title="Field guide">${icon("book")}</button><button class="icon-button" data-action="sound" aria-label="Mute sound" title="Toggle sound"></button><button class="icon-button" data-action="settings" aria-label="Open settings" title="Settings">${icon("settings")}</button>${devMode ? `<button class="icon-button dev-button" data-action="editor" aria-label="Edit balance" title="Edit balance (F2)">${icon("edit")}</button>` : ""}</div>
       </header>
-      <div class="trip-card" aria-label="Current fishing trip"><div class="trip-top"><span class="eyebrow">TRIP <span id="trip-number">01</span></span><span class="live-dot"></span></div><div class="trip-count">${icon("fish", 24)}<strong id="fish-left">3</strong><span>remaining</span></div><div class="trip-progress"><span id="trip-progress"></span></div><span class="trip-bottom" id="trip-caught">0 / 3 caught</span></div>
+      <div class="trip-card" aria-label="Current fishing trip"><div class="trip-top"><span class="eyebrow">TRIP <span id="trip-number">01</span></span><span class="live-dot"></span></div><div class="stamina-heading">STAMINA</div><div class="trip-count">${icon("bolt", 24)}<strong id="stamina-left">10</strong><span>/ <span id="stamina-max">10</span></span></div><div class="trip-progress" id="stamina-meter" role="progressbar" aria-label="Stamina" aria-valuemin="0"><span id="trip-progress"></span></div><span class="trip-bottom" id="trip-caught">0 caught · 3 in pond</span></div>
       <button class="world-sign tree-sign" data-travel="tree" aria-label="Walk to the skill tree">${icon("tree", 20)}<span>Skills</span>${icon("arrow", 12)}</button>
       <button class="world-sign shop-sign" data-travel="shop" aria-label="Walk to the tackle shop">${icon("bag", 20)}<span>Rod shop</span>${icon("arrow", 12)}</button>
       ${BUILDING_PLOTS.map((_, index) => `<div class="building-plot-label" data-plot="${index}" aria-label="Empty building plot ${index + 1}. To be revealed." hidden><span class="plot-mystery">?</span><span>To be revealed</span></div>`).join("")}
       <button class="travel-sign" id="travel-sign" data-travel="camp">${icon("down", 16)} Base <kbd>S</kbd></button>
       <div class="interaction-hint" id="interaction-hint" hidden></div>
-      <div class="pond-empty" id="pond-empty" hidden><span class="empty-icon">${icon("check", 24)}</span><h2>Pond cleared!</h2><p>Upgrade at base. Return for a new trip.</p><button class="primary-button" data-travel="tree">${icon("tree", 18)} Upgrade skills ${icon("down", 16)}</button></div>
+      <div class="trip-ended" id="trip-ended" role="status" hidden><span class="empty-icon">${icon("bolt", 24)}</span><h2>Out of stamina</h2><p>Rest at base, then return for a new trip.</p><button class="primary-button" data-travel="camp">${icon("home", 18)} Return to base ${icon("down", 16)}</button></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div class="loading-screen" id="loading"><span class="loading-fish">${icon("fish", 48)}</span><h2>Loading pond…</h2></div>
       <div class="touch-controls" aria-label="Touch movement controls"><button data-direction="a" aria-label="Walk left">←</button><div><button data-direction="w" aria-label="Walk up">↑</button><button data-direction="s" aria-label="Walk down">↓</button></div><button data-direction="d" aria-label="Walk right">→</button></div>
@@ -138,20 +139,29 @@ function updateUI(force = false): void {
     state.inCamp,
     state.trip,
     state.rod,
+    state.stamina,
+    state.maxStamina,
     balance,
   ]);
   if (!force && signature === uiSignature) return;
   uiSignature = signature;
   $("#money").textContent = money(state.money);
-  $("#fish-left").textContent = String(state.fish.length);
+  $("#stamina-left").textContent = String(state.stamina);
+  $("#stamina-max").textContent = String(state.maxStamina);
   $("#trip-number").textContent = String(state.trip).padStart(2, "0");
   $("#trip-caught").textContent =
-    `${state.tripCaught} / ${state.tripTotal} caught`;
+    `${state.tripCaught} caught · ${state.fish.length} in pond`;
   $("#trip-progress").style.width =
-    `${(state.tripCaught / state.tripTotal) * 100}%`;
+    `${(state.stamina / state.maxStamina) * 100}%`;
+  $("#stamina-meter").setAttribute("aria-valuenow", String(state.stamina));
+  $("#stamina-meter").setAttribute("aria-valuemax", String(state.maxStamina));
+  $(".trip-card").classList.toggle(
+    "low-stamina",
+    state.stamina <= state.maxStamina * 0.3,
+  );
   $(".game-stage").classList.toggle("in-camp", state.inCamp);
   $(".trip-card").hidden = state.inCamp;
-  $("#pond-empty").hidden = state.fish.length !== 0 || state.inCamp;
+  $("#trip-ended").hidden = state.stamina > 0 || state.inCamp;
   const travel = $("#travel-sign");
   travel.dataset.travel = state.inCamp ? "lake" : "camp";
   travel.innerHTML = state.inCamp
@@ -167,6 +177,10 @@ function updateUI(force = false): void {
     $("#money").classList.remove("coin-pop");
     void $("#money").offsetWidth;
     $("#money").classList.add("coin-pop");
+  }
+  if (state.stamina !== lastStamina) {
+    lastStamina = state.stamina;
+    save();
   }
 }
 
@@ -236,7 +250,7 @@ function skillEffect(id: SkillId, next = false): string {
   const stats = getStats(clone, balance);
   switch (id) {
     case "population":
-      return `${stats.population} fish / trip`;
+      return `${stats.population} fish / school`;
     case "damage":
       return `${num(stats.damage)} damage / tick`;
     case "speed":
@@ -302,7 +316,7 @@ function openJournal(): void {
 function openSettings(): void {
   openDialog(
     "settings",
-    `${dialogHeader("", "Settings")}<div class="settings-content"><label class="setting-row"><span><strong>Sound effects</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>How to play</h3><p>Use the <b>direction pad</b>, <b>WASD</b>, or <b>arrow keys</b> to move. Tap a path or destination sign to walk there.</p><p>At the end of the dock, <b>hold a fish</b> to catch it, or hover with a mouse. Catches earn coins automatically.</p><p>Walk down to base and tap <b>Skills</b> or <b>Rod shop</b> to upgrade. Return to the pond for a new trip. Your progress saves in this browser.</p></div><div class="credits">CraftPix pixel art · Stillwater<br>Mobile: portrait recommended. Desktop: press E to interact.</div></div>`,
+    `${dialogHeader("", "Settings")}<div class="settings-content"><label class="setting-row"><span><strong>Sound effects</strong><small>Soft notes for ticks, catches, and upgrades.</small></span><input type="checkbox" id="sound-setting" ${audio.enabled ? "checked" : ""}></label><label class="setting-row"><span><strong>Reduce motion</strong><small>Reduce water shimmer, clouds, and catch particles.</small></span><input type="checkbox" id="motion-setting" ${reducedMotion ? "checked" : ""}></label><div class="how-to"><h3>How to play</h3><p>Use the <b>direction pad</b>, <b>WASD</b>, or <b>arrow keys</b> to move. Tap a path or destination sign to walk there.</p><p>At the end of the dock, <b>hold a fish</b> to catch it, or hover with a mouse. Catches earn coins automatically. Each damage tick uses <b>1 stamina</b>, even when it hits several fish.</p><p>Walk down to base and tap <b>Skills</b> or <b>Rod shop</b> to upgrade. Clearing the pond brings a new school without restoring stamina. At <b>0 stamina</b>, the trip ends. Visit base and return to start a new trip with full stamina. Your progress saves in this browser.</p></div><div class="credits">CraftPix pixel art · Stillwater<br>Mobile: portrait recommended. Desktop: press E to interact.</div></div>`,
   );
   $("#sound-setting").addEventListener("change", (e) => {
     audio.enabled = (e.target as HTMLInputElement).checked;
@@ -329,8 +343,8 @@ function openEditor(): void {
   if (!devMode) return;
   openDialog(
     "editor",
-    `${dialogHeader("DEVELOPER TOOLS · LIVE BALANCE", "Find the sweet spot.", "Changes apply immediately and save to this browser. Population changes start next trip.")}
-    <form id="balance-form"><div class="editor-scroll"><section class="editor-section"><div class="editor-section-heading"><h3>The starting cast</h3><span>BASE STATS</span></div><div class="editor-fields">${numericField("Starting fish", "base.population", balance.base.population, 1, "1", 100)}${numericField("Damage per tick", "base.damage", balance.base.damage, 0.1, "any", 10000)}${numericField("Tick interval (ms)", "base.tickMs", balance.base.tickMs, 80, "any", 10000)}${numericField("Cursor radius (px)", "base.radius", balance.base.radius, 10, "any", 200)}</div></section>
+    `${dialogHeader("DEVELOPER TOOLS · LIVE BALANCE", "Find the sweet spot.", "Changes apply immediately and save to this browser. Population and stamina changes start next trip.")}
+    <form id="balance-form"><div class="editor-scroll"><section class="editor-section"><div class="editor-section-heading"><h3>The starting cast</h3><span>BASE STATS</span></div><div class="editor-fields">${numericField("Starting fish", "base.population", balance.base.population, 1, "1", 100)}${numericField("Starting stamina", "base.stamina", balance.base.stamina, 1, "1", 10000)}${numericField("Damage per tick", "base.damage", balance.base.damage, 0.1, "any", 10000)}${numericField("Tick interval (ms)", "base.tickMs", balance.base.tickMs, 80, "any", 10000)}${numericField("Cursor radius (px)", "base.radius", balance.base.radius, 10, "any", 200)}</div></section>
     <section class="editor-section"><div class="editor-section-heading"><h3>Room to grow</h3><span>SKILL COSTS & EFFECTS</span></div><div class="editor-skill-table"><div class="editor-table-head"><span>SKILL</span><span>BASE COST $</span><span>COST ×</span><span>FLAT LEVELS</span><span>EFFECT / LVL</span><span>MAX LVL</span></div>${SKILL_IDS.map(
       (id) => {
         const b = balance.skills[id];
@@ -487,7 +501,9 @@ document.addEventListener("click", (e) => {
         spawnTrip(state, balance);
         save();
         updateUI();
-        editorMessage(`Restocked ${state.fish.length} fish for this playtest.`);
+        editorMessage(
+          `Restocked ${state.fish.length} fish and refilled stamina for this playtest.`,
+        );
       }
       break;
     case "reset-save":
